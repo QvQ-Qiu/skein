@@ -12,10 +12,8 @@ from __future__ import annotations
 import json
 import sqlite3
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Callable
-
-from skein import db
 
 
 class EffectState:
@@ -106,7 +104,7 @@ class Outbox:
 
         try:
             response = self._writer(kind, object_, payload)
-        except Exception as exc:  # noqa: BLE001 - 失败要落库，再抛给调用方
+        except Exception as exc:
             mark_failed(self._conn, key, str(exc))
             raise
         confirm(self._conn, key, response)

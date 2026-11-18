@@ -1,7 +1,7 @@
 import pytest
 
 from skein import db
-from skein.outbox import EmitResult, EffectState, Outbox, get, pending
+from skein.outbox import EffectState, EmitResult, Outbox, get, pending
 
 
 @pytest.fixture()

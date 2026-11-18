@@ -4,8 +4,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from skein.llm import LLMClient
-
 ROUTE_TOOLS = ("route", "attach", "ignore", "stop", "note")
 
 ROUTE_SYSTEM_PROMPT = (

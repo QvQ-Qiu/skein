@@ -5,7 +5,6 @@ from __future__ import annotations
 import json
 import sqlite3
 import time
-import uuid
 
 from skein import db
 from skein.admission import Event

@@ -6,8 +6,9 @@
 from __future__ import annotations
 
 import sqlite3
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Callable, Protocol
+from typing import Protocol
 
 from skein import db, store
 from skein.admission import DEFAULT_POLICY, Event, SourcePolicy, Verdict, decide

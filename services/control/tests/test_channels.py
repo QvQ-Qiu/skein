@@ -1,6 +1,7 @@
 import json
 import threading
 from http.server import BaseHTTPRequestHandler, HTTPServer
+from typing import ClassVar
 
 import pytest
 
@@ -8,7 +9,7 @@ from skein.channels import ForumWriteError, HttpWriter
 
 
 class Handler(BaseHTTPRequestHandler):
-    received = []
+    received: ClassVar[list] = []
     status = 200
 
     def do_POST(self):

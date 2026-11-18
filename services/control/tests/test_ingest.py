@@ -78,10 +78,10 @@ def test_comment_attaches_to_post_thread(conn):
 
 def test_mentions_are_marked_for_processing(conn):
     Ingestor(conn, FakeSource(items())).poll()
-    verdicts = dict(
-        (r["origin_id"], r["verdict"])
+    verdicts = {
+        r["origin_id"]: r["verdict"]
         for r in conn.execute("SELECT origin_id, verdict FROM events")
-    )
+    }
     assert verdicts == {"p1": "ignore", "c1": "ignore", "c2": "process"}
 
 

@@ -1,3 +1,7 @@
+from dataclasses import FrozenInstanceError
+
+import pytest
+
 from skein.admission import Decision, Event, SourcePolicy, Verdict, decide
 
 
@@ -65,8 +69,5 @@ def test_disabled_source_is_ignored():
 
 def test_decision_is_frozen():
     d = Decision(Verdict.IGNORE, "x")
-    try:
+    with pytest.raises(FrozenInstanceError):
         d.reason = "y"
-    except Exception:
-        return
-    raise AssertionError("Decision should be immutable")

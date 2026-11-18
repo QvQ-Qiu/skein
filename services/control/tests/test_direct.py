@@ -1,3 +1,5 @@
+import pytest
+
 from skein.router.direct import (
     DISPATCH,
     DirectRequestError,
@@ -5,11 +7,8 @@ from skein.router.direct import (
     Reply,
     build_direct_request,
     ensure_no_tools,
-    freeze_request,
     parse_direct_response,
 )
-
-import pytest
 
 
 class FakeLLM:

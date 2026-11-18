@@ -27,7 +27,7 @@ class Config:
     shadow: bool = False
 
     @classmethod
-    def from_env(cls, env: dict[str, str] | None = None) -> "Config":
+    def from_env(cls, env: dict[str, str] | None = None) -> Config:
         source = os.environ if env is None else env
         base = cls()
         return cls(

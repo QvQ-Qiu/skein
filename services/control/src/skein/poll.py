@@ -50,7 +50,7 @@ def main() -> None:
             written = ingestor.poll()
             if written:
                 log.info("写入 %s 条事件", written)
-        except Exception:  # noqa: BLE001 - 采集失败不应退出循环
+        except Exception:
             log.exception("采集失败，下一轮重试")
         time.sleep(cfg.poll_interval)
 
