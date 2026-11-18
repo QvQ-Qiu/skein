@@ -48,6 +48,21 @@ def test_ticket_code_unique(conn):
         )
 
 
+def test_dedup_key_unique(conn):
+    t = db.now()
+    conn.execute(
+        "INSERT INTO tickets (id, code, title, status, dedup_key, created_at, updated_at)"
+        " VALUES (?, ?, ?, ?, ?, ?, ?)",
+        ("t8", "SK-8", "a", "staged", "forum:c1", t, t),
+    )
+    with pytest.raises(sqlite3.IntegrityError):
+        conn.execute(
+            "INSERT INTO tickets (id, code, title, status, dedup_key, created_at, updated_at)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?)",
+            ("t9", "SK-9", "b", "staged", "forum:c1", t, t),
+        )
+
+
 def test_foreign_keys_are_enforced(conn):
     t = db.now()
     with pytest.raises(sqlite3.IntegrityError):

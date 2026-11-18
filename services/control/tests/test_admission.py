@@ -46,6 +46,13 @@ def test_allowlisted_can_stop_recording():
     assert d.verdict is Verdict.IGNORE
 
 
+def test_allowlisted_without_mention_requirement_is_processed():
+    policy = SourcePolicy(require_mention=False)
+    d = decide(Event(source="forum_comment", origin_id="6b", text="继续讲讲", in_allowlist=True), policy)
+    assert d.verdict is Verdict.PROCESS
+    assert d.reason == "allowlisted_no_mention_required"
+
+
 def test_stranger_is_ignored():
     d = decide(Event(source="forum_comment", origin_id="7", text="路人发言"))
     assert d.verdict is Verdict.IGNORE

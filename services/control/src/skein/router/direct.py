@@ -8,13 +8,22 @@
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from typing import Literal
 
 from skein.llm import LLMClient
 
-FORBIDDEN_REQUEST_KEYS = ("tools", "tool_choice", "functions", "function_call")
+FORBIDDEN_REQUEST_KEYS = (
+    "tools",
+    "tool_choice",
+    "functions",
+    "function_call",
+    "tool_calls",
+    "tool_use",
+)
 FORBIDDEN_RESPONSE_KEYS = ("tool_use", "tool_calls", "function_call")
+TOOL_BLOCK_TYPES = ("tool_use", "tool_call", "tool_result")
 
 DISPATCH_RESULT_TEXT = "收到，我转给负责的同事处理。"
 
@@ -32,24 +41,70 @@ class DirectRequestError(ValueError):
     pass
 
 
+def _find_key(obj: object, keys: tuple[str, ...]) -> str | None:
+    if isinstance(obj, dict):
+        for key, value in obj.items():
+            if key in keys:
+                return key
+            found = _find_key(value, keys)
+            if found:
+                return found
+    elif isinstance(obj, list):
+        for item in obj:
+            found = _find_key(item, keys)
+            if found:
+                return found
+    return None
+
+
 def ensure_no_tools(request: dict) -> dict:
-    for key in FORBIDDEN_REQUEST_KEYS:
-        if key in request:
-            raise DirectRequestError(f"direct reply must not carry {key}")
+    bad = _find_key(request, FORBIDDEN_REQUEST_KEYS)
+    if bad:
+        raise DirectRequestError(f"direct reply must not carry {bad}")
     return request
 
 
+def freeze_request(request: dict) -> dict:
+    """构造后冻结：先深度查禁用键，再序列化复核，最后用序列化结果重建。
+
+    返回的是一个新对象，调用方之后改动原 dict 不会影响已冻结的请求。
+    """
+    ensure_no_tools(request)
+    text = json.dumps(request, ensure_ascii=False, sort_keys=True)
+    for key in FORBIDDEN_REQUEST_KEYS:
+        if f'"{key}"' in text:
+            raise DirectRequestError(f"direct reply must not carry {key}")
+    return json.loads(text)
+
+
 def build_direct_request(model: str, messages: list[dict], max_tokens: int = 800) -> dict:
-    return ensure_no_tools({"model": model, "messages": messages, "max_tokens": max_tokens})
+    return freeze_request({"model": model, "messages": messages, "max_tokens": max_tokens})
+
+
+def _has_tool_marker(obj: object) -> bool:
+    if isinstance(obj, dict):
+        for key, value in obj.items():
+            if key in FORBIDDEN_RESPONSE_KEYS:
+                return True
+            if key == "content" and isinstance(value, list):
+                for block in value:
+                    if isinstance(block, dict) and block.get("type") in TOOL_BLOCK_TYPES:
+                        return True
+            if _has_tool_marker(value):
+                return True
+    elif isinstance(obj, list):
+        return any(_has_tool_marker(item) for item in obj)
+    return False
 
 
 def parse_direct_response(raw: object) -> Reply:
     if not isinstance(raw, dict):
         return DISPATCH
 
-    for key in FORBIDDEN_RESPONSE_KEYS:
-        if key in raw:
-            return DISPATCH
+    if raw.get("stop_reason") in ("tool_use", "tool_calls"):
+        return DISPATCH
+    if _has_tool_marker(raw):
+        return DISPATCH
 
     action = raw.get("action")
     if action == "dispatch":

@@ -105,6 +105,15 @@ def test_route_ignore_creates_no_ticket(conn):
     assert ticket_count(conn) == 0
 
 
+def test_comment_thread_uses_parent_post(conn):
+    event = Event(
+        source="forum_comment", origin_id="c9", parent_id="p7", text="帮忙", mentioned=True
+    )
+    host(conn, FakeLLM(route={"action": "route"})).on_event(event)
+    row = conn.execute("SELECT origin, origin_id FROM threads").fetchone()
+    assert tuple(row) == ("forum_comment", "p7")
+
+
 def test_dedup_key_attaches_instead_of_second_ticket(conn):
     llm = FakeLLM(route={"action": "route"})
     h = host(conn, llm)

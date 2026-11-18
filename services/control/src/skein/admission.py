@@ -25,6 +25,7 @@ class Event:
     mentioned: bool = False
     in_allowlist: bool = False
     replies_to_agent: bool = False
+    parent_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -61,6 +62,10 @@ def decide(event: Event, policy: SourcePolicy = DEFAULT_POLICY) -> Decision:
         return Decision(Verdict.PROCESS, "allowed_followup")
 
     if event.in_allowlist:
+        if not policy.require_mention:
+            if text_len < policy.min_text_chars:
+                return Decision(Verdict.RECORD, "allowed_too_short")
+            return Decision(Verdict.PROCESS, "allowlisted_no_mention_required")
         if policy.record_unmentioned:
             return Decision(Verdict.RECORD, "allowlisted_unmentioned")
         return Decision(Verdict.IGNORE, "unmentioned_not_recorded")

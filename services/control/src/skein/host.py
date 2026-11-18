@@ -38,8 +38,16 @@ class RouterHost:
         reply = self._direct.reply(messages)
         if reply.action == "say":
             return HostResult("say", reply.text)
-        ticket_id = store.create_ticket(self._conn, title=self._title(messages))
-        db.record_audit(self._conn, "router", "dispatch", {"ticket_id": ticket_id, "from": "chat"})
+        self._conn.execute("BEGIN IMMEDIATE")
+        try:
+            ticket_id = store.create_ticket(self._conn, title=self._title(messages))
+            db.record_audit(
+                self._conn, "router", "dispatch", {"ticket_id": ticket_id, "from": "chat"}
+            )
+            self._conn.execute("COMMIT")
+        except Exception:
+            self._conn.execute("ROLLBACK")
+            raise
         return HostResult("dispatch", DISPATCH_RESULT_TEXT, ticket_id)
 
     def on_event(self, event: Event) -> HostResult:
@@ -94,4 +102,4 @@ class RouterHost:
 
     @staticmethod
     def _origin_thread(event: Event) -> str:
-        return event.origin_id
+        return event.parent_id or event.origin_id

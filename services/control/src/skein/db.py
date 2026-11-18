@@ -12,7 +12,7 @@ import time
 import uuid
 from pathlib import Path
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS events (
@@ -138,6 +138,7 @@ CREATE TABLE IF NOT EXISTS audit (
 
 CREATE INDEX IF NOT EXISTS idx_events_thread ON events (thread_id);
 CREATE INDEX IF NOT EXISTS idx_tickets_status ON tickets (status);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_tickets_dedup ON tickets (dedup_key) WHERE dedup_key IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_subscriptions_thread ON subscriptions (thread_id);
 CREATE INDEX IF NOT EXISTS idx_audit_created ON audit (created_at);
 """

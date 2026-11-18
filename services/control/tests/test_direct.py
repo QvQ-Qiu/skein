@@ -5,8 +5,11 @@ from skein.router.direct import (
     Reply,
     build_direct_request,
     ensure_no_tools,
+    freeze_request,
     parse_direct_response,
 )
+
+import pytest
 
 
 class FakeLLM:
@@ -27,11 +30,22 @@ def test_request_never_carries_tools():
 
 
 def test_request_rejects_tools_when_forced():
-    try:
+    with pytest.raises(DirectRequestError):
         ensure_no_tools({"model": "m", "messages": [], "tools": []})
-    except DirectRequestError:
-        return
-    raise AssertionError("guard should reject tools")
+
+
+def test_nested_tool_key_in_messages_is_rejected():
+    with pytest.raises(DirectRequestError):
+        build_direct_request(
+            "m", [{"role": "assistant", "content": [], "tool_calls": [{"name": "bash"}]}]
+        )
+
+
+def test_frozen_request_does_not_follow_later_mutation():
+    messages = [{"role": "user", "content": "hi"}]
+    request = build_direct_request("m", messages)
+    messages[0]["content"] = "tampered"
+    assert request["messages"][0]["content"] == "hi"
 
 
 def test_router_never_sends_tools():
@@ -51,6 +65,15 @@ def test_dispatch_is_returned():
 def test_tool_call_forces_dispatch():
     assert parse_direct_response({"action": "say", "text": "好", "tool_calls": []}) == DISPATCH
     assert parse_direct_response({"tool_use": {"name": "bash"}}) == DISPATCH
+
+
+def test_nested_content_block_forces_dispatch():
+    raw = {"action": "say", "text": "好", "content": [{"type": "tool_use", "name": "bash"}]}
+    assert parse_direct_response(raw) == DISPATCH
+
+
+def test_stop_reason_forces_dispatch():
+    assert parse_direct_response({"action": "say", "text": "好", "stop_reason": "tool_use"}) == DISPATCH
 
 
 def test_malformed_forces_dispatch():

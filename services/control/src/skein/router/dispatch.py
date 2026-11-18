@@ -23,6 +23,19 @@ class RouteRequestError(ValueError):
     pass
 
 
+def _tool_name(tool: object) -> str | None:
+    if isinstance(tool, str):
+        return tool
+    if isinstance(tool, dict):
+        name = tool.get("name")
+        if isinstance(name, str):
+            return name
+        function = tool.get("function")
+        if isinstance(function, dict) and isinstance(function.get("name"), str):
+            return function["name"]
+    return None
+
+
 def build_route_request(model: str, messages: list[dict], max_tokens: int = 1500) -> dict:
     request = {
         "model": model,
@@ -31,8 +44,9 @@ def build_route_request(model: str, messages: list[dict], max_tokens: int = 1500
         "tools": list(ROUTE_TOOLS),
     }
     for tool in request["tools"]:
-        if tool in FORBIDDEN_TOOLS:
-            raise RouteRequestError(f"route tools must not include {tool}")
+        name = _tool_name(tool)
+        if name in FORBIDDEN_TOOLS:
+            raise RouteRequestError(f"route tools must not include {name}")
     return request
 
 
