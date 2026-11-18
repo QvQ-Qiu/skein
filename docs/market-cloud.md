@@ -33,14 +33,29 @@
 
 ### 2.2 通过 YatTerra 平台创建 pod（今天没用上）
 
-YatTerra 是同学做的部署管理平台，API v1（`grp-deploy` 13007、`platform-gui` 14000、`web-gui` 17500）：
+YatTerra 是同学做的部署管理平台（`platform-gui` 14000，Vite+React；`web-gui` 17500 是另一个 Go 服务，不是它；`grp-deploy` 13007 当前不可达）。2026-11-18 只读实测（普通用户视角）：
 
-- `groups`：项目组生命周期（start / stop / restart / logs）
-- `deploys`：组内部署 CRUD，run / stop / status / logs
-- `databases`、`storage`：库与桶的凭据发放
-- `host/health`、`audit`、`tokens`、`users`
+**登录**：账号密码 `POST /api/auth/login`；游客 `POST /api/auth/guest`（只读）；OAuth 走 UniSSO 或 SSE Market；会话用 Cookie + CSRF；个人 API Token 用 `Authorization: Bearer`（`/api/tokens`）。平台域 `cloud.ssemarket.cn`。
 
-**认证是 Bearer token，token 尚未提供给我们。** 也就是说：能力存在、接口清楚，但我们今天没有拿到钥匙，也没有任何代码接入它。
+**角色**：super / admin / user / guest。user 只能看见自己的 Pod；guest 只读。
+
+**Pod（资源层）**：`POST /api/pods {name, cpu, mem, gpus, storage, node, tag}`，默认 2C/4G/20G；可启停、重启、改名、换节点、resize；有 SSH/Web 终端、文件读写上传、日志指标。
+
+**Deploy（应用层）**：**不能选镜像**。Pod 是平台预置的 `cloud-ubuntu` 类环境，部署只跑仓库或本地脚本：
+
+- 字段：`name`、`source(repo|local)`、`repo/branch/subdir` 或 `script`、私有库 token、`mode(service|oneshot)`、`kind(serve|train)`、`gpu`、`vram`、`health`、`health_timeout`、`auto_deploy`、`contract`（延迟/抢占/截止/预计时长）
+- 平台注入：`PORT=8080`、`LOG_DIR`、**`DEPLOY_ID` / `REPORT_URL` / `REPORT_TOKEN`**
+- `/shared` 只读挂载；supervisord 拉起服务；oneshot 可重复执行；`PRIORITY` 参与压力驱逐
+
+**状态与日志**：Pod 状态 Running/Stopped/Pending/Failed/Succeeded；`GET /pods/:name/deploys`、`/:id/status`（healthy/unhealthy）、`/:id/logs?tail=200`，另有 SSE 日志流。
+
+**存储**：MinIO。`/api/infra/storage` 可列桶与 key，但 `infra.*` 属管理员面；普通用户能拿到的是 **Pod 自身的存储配额**与 `/shared` 只读。桶的创建/删除权限对普通用户是否开放，未确认。
+
+**配额**：`GET /pods/limits` 返回 `{scoped, caps{cpu, mem_gib, storage_gib, gpu_allowed}}`，超限拒绝或夹取；按 Pod 资源逐小时从个人额度扣费。
+
+**出网**：未确认。间接证据是可以部署 GitHub/Gitee 仓库、模板里有 `pip install`，说明至少能拉依赖与仓库。
+
+**这直接推翻了两条早期假设**：① 不能自带镜像，worker 只能是「仓库 + 启动脚本」；② 平台已经提供 `REPORT_URL`/`REPORT_TOKEN`，结果回传不必自建回调入口。
 
 ## 三、旧雁阵与集市云的真实关系：零
 

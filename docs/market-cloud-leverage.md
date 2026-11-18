@@ -15,21 +15,23 @@
 
 **结论：能发挥的是「算」，不是「写」。** 集市云 pod 适合做无状态、结果可回传的重活；任何需要本机回环或宿主能力的事仍然只能在 A 上。
 
-## 二、两块缺失的基础件
+## 二、两块缺失的基础件（按 YatTerra 实测修正）
 
-### 2.1 用 S3 当「盘」
+### 2.1 用 Pod 存储当「盘」，MinIO 待确认
 
-pod 没有持久盘，但它有 YatTerra 的 storage API（buckets/keys）。这正好补上架构里 Session 权威的存储形态：
+YatTerra 的 Pod 自带存储配额（默认 20G），这是 pod worker 唯一能确定拿到的持久空间。MinIO 桶虽然存在，但 `/api/infra/storage` 属管理员面，普通用户能否建桶与发 key **未确认**。
 
-- Session 索引行留在 A 的领域库；
-- transcript、git bundle、脏补丁、大产物上传到 S3，按 sha256 内容寻址；
-- A 只存指针，不存字节。
+因此：
 
-这样「pod 无状态」不再是缺陷，而是默认形态。
+- transcript、未推送的 git bundle、脏补丁，在每轮结束时写到 **Pod 本地存储 + 平台注入的 `REPORT_URL`**；
+- 是否能长期留在 MinIO，等权限确认后再定；
+- A 上的 Session 权威仍存索引与内容寻址文件——pod 的本地存储只是传输中转，不是权威。
 
-### 2.2 写回中继
+### 2.2 两套回传，用途不同
 
-pod 里的 worker 拿不到论坛回环，但可以打 A 的公网 HTTPS。需要在 A 上开一个受控入口：
+平台已经注入 `DEPLOY_ID` / `REPORT_URL` / `REPORT_TOKEN`，所以**进度与结果不需要我们自建回调**，直接用平台通道。
+
+但论坛写仍然需要 A 上的中继，因为 pod 没有论坛凭据，也不该有：
 
 ```
 POST https://ssemarket.cn/internal/outbox/emit
@@ -37,24 +39,20 @@ Header: X-Skein-Token: <per-job token>
 Body: { "kind": "post|comment|featured", "object": "...", "payload": {...}, "effect_key": "..." }
 ```
 
-- 每张工单发一个短期 token，绑定 ticket_id 与允许的动词；
-- `effect_key` 交给 Outbox 做单次写，重复提交返回已存在；
-- 校验在 A 上，pod 只负责请求。
-
-这比直接给 pod 论坛凭据安全得多，也和架构里「Worker 只交结果」一致。
+两者分工：**平台通道报「干到哪了」，Outbox 报「要不要写出去」。** 前者是遥测，后者是写权限。
 
 ## 三、Cloud Worker 契约
 
 | 环节 | 做法 |
 | --- | --- |
-| 提交 | 调 YatTerra `deploys` 创建，名字以 `skein-` 开头，带资源规格与 TTL |
-| 输入 | 工单内容 + 短期 token + S3 预签名地址，全部走环境变量，不落盘 |
-| 运行 | 镜像里只跑任务本体；日志写 stdout（YatTerra 可查） |
-| 产物 | 上传 S3，回执带 sha256；小结果可直接放进回调 body |
-| 回写 | 只通过 `outbox/emit`，不直接碰论坛 |
-| 心跳 | 每 30 秒打一次 `POST /internal/worker/heartbeat`，带 deploy_id |
-| 结束 | 主动 stop；A 侧超时也会 stop |
-| 失败 | 分三类：提交失败 / 起来了但没心跳 / 有心跳但没回执。分别重试、等 TTL、查日志 |
+| 提交 | `POST /api/pods` 建 Pod（cpu/mem/gpus/storage/node），再建 deploy（`source=repo`，指定分支与启动脚本，`mode=oneshot`） |
+| 输入 | 工单内容、短期工单 token、仓库地址与分支，通过 `POST /pods/:name/env` 注入 |
+| 运行 | **不能自带镜像**：在平台预置的 `cloud-ubuntu` 环境里 clone 仓库、装依赖、跑脚本；日志走 stdout |
+| 进度 | 用平台注入的 `REPORT_URL` / `REPORT_TOKEN` 上报，不自建心跳通道 |
+| 产物 | 写 Pod 本地存储；能否进 MinIO 待确认 |
+| 回写 | 只通过 A 的 `outbox/emit`，不直接碰论坛 |
+| 结束 | oneshot 自然结束，或主动 stop；A 侧超时也会 stop |
+| 失败 | 分三类：提交失败 / 起来了但没上报 / 上报了但没回执。分别重试、查 logs、标失败 |
 
 ## 四、调度器要加的一层
 
@@ -78,12 +76,14 @@ Body: { "kind": "post|comment|featured", "object": "...", "payload": {...}, "eff
 
 ## 六、待确认（决定这套能不能落地）
 
-1. token 是否能拿到，权限范围多大（能否只给 deploy + logs）。
-2. 镜像从哪个 registry 拉，能不能用我们的私有仓。
-3. pod 能否访问公网/A（决定是「pod 回调 A」还是「A 轮询拉结果」）。
-4. 能否指定 GPU 与资源规格，配额多少。
-5. S3 的桶与凭据由谁发、容量与保留策略。
-6. deploy 停止后日志保留多久（决定失败排查窗口）。
+1. 账号与权限：用谁的身份接入？普通 user 能否建 Pod 与 deploy，个人 API Token 能否长期使用。
+2. 仓库访问：私有仓库的 token 怎么给，平台从 GitHub/Gitee 拉代码时走什么网络。
+3. 出网：pod clone 仓库与装依赖已见间接证据，但能否访问 A（`ssemarket.cn`）仍未确认。
+4. 资源与配额：`/pods/limits` 的实际数值，GPU 是否可申请。
+5. 存储：Pod 本地存储在 stop/重建后是否保留；普通用户能否建 MinIO 桶、发 key。
+6. 基础环境：`cloud-ubuntu` 预装了什么（Python 版本、git、pip），决定 worker 的启动脚本怎么写。
+7. 日志保留：deploy 停止后日志留多久，决定失败排查窗口。
+8. 并发：同时能跑几个 deploy。
 
 ## 七、一句话
 
