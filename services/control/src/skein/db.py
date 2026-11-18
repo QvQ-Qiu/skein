@@ -12,7 +12,7 @@ import time
 import uuid
 from pathlib import Path
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS events (
@@ -104,6 +104,28 @@ CREATE TABLE IF NOT EXISTS prompt_pointers (
     stable_revision INTEGER NOT NULL DEFAULT 0,
     canary_revision INTEGER,
     frozen_until    REAL
+);
+
+CREATE TABLE IF NOT EXISTS sessions (
+    id          TEXT PRIMARY KEY,
+    ticket_id   TEXT,
+    node_id     TEXT,
+    pinned      INTEGER NOT NULL DEFAULT 1,
+    created_at  REAL NOT NULL,
+    updated_at  REAL NOT NULL,
+    FOREIGN KEY (ticket_id) REFERENCES tickets (id)
+);
+
+CREATE TABLE IF NOT EXISTS session_turns (
+    session_id  TEXT NOT NULL,
+    turn_index  INTEGER NOT NULL,
+    sha256      TEXT NOT NULL,
+    bytes       INTEGER NOT NULL,
+    head_sha    TEXT,
+    branch      TEXT,
+    created_at  REAL NOT NULL,
+    PRIMARY KEY (session_id, turn_index),
+    FOREIGN KEY (session_id) REFERENCES sessions (id)
 );
 
 CREATE TABLE IF NOT EXISTS audit (
