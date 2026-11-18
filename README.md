@@ -36,6 +36,7 @@ docs/
   architecture.md            五模块与三份权威
   plan.md                    目标、进度与剩余工作
   control-plane.md           控制面现状、接口与环境变量
+  console.md                 控制台现状、目标 IA 与迁移步骤
   deployment.md              部署、切换与回滚
   migration.md               十步迁移与服务器工作树
   sandbox.md                 沙箱方案与止损

@@ -22,6 +22,10 @@
 
 8. [sandbox.md](sandbox.md) —— systemd 沙箱的配额、做不到的事、止损三步
 
+## 要做前端
+
+9. [console.md](console.md) —— 控制台现状、目标 IA、技术选型、接口差距、迁移步骤
+
 ## 决策记录
 
 9. [adr/0001-five-modules.md](adr/0001-five-modules.md) —— 为什么采用五模块
