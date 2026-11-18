@@ -33,6 +33,7 @@ legacy/
   dispatcher/   [迁移中] 重构前的 Node 调度台
 docs/
   architecture.md            五模块与三份权威
+  control-plane.md           控制面现状、接口与环境变量
   market-cloud.md            集市云执行环境契约
   market-cloud-leverage.md   集市云能怎么发挥
   migration.md               十步迁移与切换日
