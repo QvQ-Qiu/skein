@@ -159,3 +159,12 @@ def test_prompt_freezes_after_two_rollbacks(client):
     assert client.post(
         "/internal/prompts/unfreeze", json={"part": part}, headers=auth()
     ).status_code == 200
+
+
+def test_console_is_served(client):
+    page = client.get("/console/")
+    assert page.status_code == 200
+    assert "雁阵" in page.text
+    root = client.get("/", follow_redirects=True)
+    assert root.status_code == 200
+    assert "雁阵" in root.text

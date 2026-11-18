@@ -20,6 +20,8 @@
 | 调度 | `skein/scheduler.py` | 在线窗口、容量、平台匹配 |
 | 作业驱动 | `skein/driver.py`、`skein/runs.py` | 到点开工、按 (job, day) 去重、线程执行 |
 | 写入口兼容 | `skein/compat.py` | 加精按帖幂等、发帖按内容哈希幂等 |
+| Watchdog | `skein/watchdog.py`、`skein/prompts.py` | 信号只读真值；提示词修订走金丝雀与冻结 |
+| 面板 | `services/console/` | 静态页，由控制面托管在 `/console/` |
 | 通道 | `skein/channels.py` | 论坛内部口写入，禁用系统代理 |
 | 模型客户端 | `skein/llm_http.py` | OpenAI 兼容网关，强制 JSON |
 
@@ -74,6 +76,14 @@ make run-poll    # 采集循环
 | POST | `/internal/runs` | 有 | 开一次作业运行（按 job+day 去重） |
 | POST | `/internal/runs/{id}/finish` | 有 | 落运行结果 |
 | GET | `/internal/runs` | 有 | 最近运行 |
+| GET | `/internal/tickets` | 有 | 工单列表（可按状态筛） |
+| GET | `/internal/nodes` | 有 | 节点列表 |
+| GET | `/internal/signals` | 有 | Watchdog 信号 |
+| GET | `/internal/prompts` | 有 | 提示词指针状态 |
+| POST | `/internal/prompts/propose` | 有 | 提出修订（走金丝雀） |
+| POST | `/internal/prompts/promote` | 有 | 升格到稳定 |
+| POST | `/internal/prompts/rollback` | 有 | 回退 |
+| POST | `/internal/prompts/unfreeze` | 有 | 人工解冻 |
 | POST | `/internal/featured` | X-Internal-Token | 兼容：批量加精，按帖幂等 |
 | POST | `/api/auth/post` | Bearer 透传 | 兼容：用户发帖，按内容哈希幂等 |
 | WS | `/api/agent/channel` | 协议内 token | 节点反向拨入 |
@@ -100,6 +110,17 @@ make review-report   # 输出一致率、混淆矩阵与分歧列表
 
 报告包含：影子总数、已标注数、覆盖率、一致率、混淆矩阵（行=人工，列=模型）以及前 20 条分歧。
 
-## 七、下一步
+## 七、面板
 
-按 `docs/migration.md` 的 S3–S5：影子对比 → 准入接管采集 → Session 同步接节点。
+控制面托管一个静态页：`http://127.0.0.1:7700/console/`。
+
+- 首次打开在右上角填 `SKEIN_TOKEN`，存在 localStorage；
+- 六个视图：概览、工单、节点、运行、信号、提示词；
+- 工单页可直接通过/驳回；提示词页可升格、回退、解冻。
+
+页面不打包、不引依赖，改完刷新即可。
+
+## 八、下一步
+
+- Watchdog 的自动提议（依据信号让模型改写 Worker 提示词）还没接；
+- 面板后续按新信息架构迁到 Vue 3 + naive-ui（`services/console` 目录已留好）。

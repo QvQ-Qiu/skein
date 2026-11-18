@@ -8,11 +8,14 @@ import hashlib
 import json
 import sqlite3
 import time
+from pathlib import Path
 
 from fastapi import Depends, FastAPI, Header, HTTPException, WebSocket
+from fastapi.responses import RedirectResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from skein import db, prompts, runs
+from skein import db, prompts, runs, watchdog
 from skein.channel import ChannelHub
 from skein.compat import ForumCompatWriter
 from skein.host import RouterHost
@@ -123,6 +126,55 @@ def create_app(
     @app.get("/internal/prompts", dependencies=[Depends(auth)])
     def list_prompts() -> dict:
         return {"prompts": [prompts.state(conn, part) for part in prompts.EDITABLE_PARTS]}
+
+    @app.get("/internal/signals", dependencies=[Depends(auth)])
+    def list_signals() -> dict:
+        return {"signals": watchdog.signals(conn)}
+
+    @app.get("/internal/tickets", dependencies=[Depends(auth)])
+    def list_tickets(status: str | None = None, limit: int = 100) -> dict:
+        sql = "SELECT id, code, title, status, thread_id, updated_at FROM tickets"
+        params: list[object] = []
+        if status:
+            sql += " WHERE status = ?"
+            params.append(status)
+        sql += " ORDER BY updated_at DESC LIMIT ?"
+        params.append(limit)
+        rows = conn.execute(sql, tuple(params)).fetchall()
+        return {
+            "tickets": [
+                {
+                    "id": r["id"],
+                    "code": r["code"],
+                    "title": r["title"],
+                    "status": r["status"],
+                    "thread_id": r["thread_id"],
+                    "updated_at": r["updated_at"],
+                }
+                for r in rows
+            ]
+        }
+
+    @app.get("/internal/nodes", dependencies=[Depends(auth)])
+    def list_nodes() -> dict:
+        rows = conn.execute(
+            "SELECT id, name, host, platforms, status, max_workers, last_seen FROM nodes"
+            " ORDER BY id"
+        ).fetchall()
+        return {
+            "nodes": [
+                {
+                    "id": r["id"],
+                    "name": r["name"],
+                    "host": r["host"],
+                    "platforms": r["platforms"],
+                    "status": r["status"],
+                    "max_workers": r["max_workers"],
+                    "last_seen": r["last_seen"],
+                }
+                for r in rows
+            ]
+        }
 
     @app.post("/internal/prompts/propose", dependencies=[Depends(auth)])
     def propose_prompt(body: PromptProposeIn) -> dict:
@@ -243,5 +295,13 @@ def create_app(
         if result == EmitResult.FAILED:
             raise HTTPException(status_code=502, detail="effect failed")
         return {"result": result}
+
+    console_dir = Path(__file__).resolve().parents[3] / "console"
+    if console_dir.is_dir():
+        app.mount("/console", StaticFiles(directory=str(console_dir), html=True), name="console")
+
+        @app.get("/")
+        def root() -> RedirectResponse:
+            return RedirectResponse(url="/console/")
 
     return app
