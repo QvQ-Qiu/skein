@@ -23,18 +23,28 @@ Super-agent 的调度与执行平台。
 ## 仓库结构
 
 ```
-skein/    控制面（Python）：Router 宿主、准入、领域库、Outbox
-worker/   节点 daemon：反向拨入、worktree、Claude Code、transcript 同步
-web/      控制台（Vue3）
-docs/     架构与设计文档
-server/   [迁移中] 重构前的 Node 调度台
-scripts/  运维脚本
+services/
+  control/      控制面（Python）：Router 宿主、准入、领域库、Outbox
+  node-agent/   节点 daemon（Node）：反向拨入、worktree、Claude Code、transcript 同步
+  console/      控制台（Vue3 + naive-ui）
+deploy/
+  scripts/      发布与验收脚本
+legacy/
+  dispatcher/   [迁移中] 重构前的 Node 调度台
+docs/
+  architecture.md            五模块与三份权威
+  market-cloud.md            集市云执行环境契约
+  market-cloud-leverage.md   集市云能怎么发挥
+  migration.md               十步迁移与切换日
+  adr/                       架构决策记录
 ```
 
 ## 开发
 
 ```bash
-python -m pytest        # 25 个测试，覆盖准入矩阵、空工具直答契约、领域库约束
+make test        # 控制面测试
+make lint        # ruff
+make build-console
 ```
 
 ## 状态
