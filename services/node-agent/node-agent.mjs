@@ -16,6 +16,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { TranscriptSync } from './transcript-sync.mjs';
+import { buildSandboxArgs, sandboxSupported, unitName } from './sandbox.mjs';
 
 const env = process.env;
 const CONTROLLER_URL = env.CONTROLLER_URL || 'ws://127.0.0.1:3030/api/agent/channel';
@@ -27,6 +28,9 @@ const MAX_WORKERS = Number(env.MAX_WORKERS || 3);
 const CLAUDE_BIN = env.CLAUDE_BIN || 'claude';
 const HEARTBEAT_MS = 15_000;
 const PUSH_BRANCH = env.PUSH_BRANCH === '1';
+// 沙箱：默认关闭；开启前需按 docs/sandbox.md 完成宿主准备
+const SANDBOX_ENABLED = env.SANDBOX_ENABLED === '1' && sandboxSupported();
+if (env.SANDBOX_ENABLED === '1' && !SANDBOX_ENABLED) console.log('[node] SANDBOX_ENABLED=1 但 systemd-run 不可用，退回直接运行');
 // worker 直连端口：room 名册里广播本 node 的 peer_url，成员 node 互拨（controller 仅兜底）
 const PEER_PORT = Number(env.PEER_PORT || 9101);
 function lanIp() {
@@ -80,7 +84,7 @@ const SAFE_TOOLS = env.WORKER_ALLOWED_TOOLS || [
   'Bash(find:*)', 'Bash(wc:*)', 'Bash(diff:*)', 'Bash(node --check:*)', 'Bash(npm test:*)',
   'Bash(npm run test:*)', 'Bash(npx vitest:*)', 'Bash(python3 -m pytest:*)', 'Bash(pwd)', 'Bash(echo:*)',
 ].join(',');
-function runClaude(repo, prompt, { resume = null, onProgress = () => {}, timeoutMs = 20 * 60_000 } = {}) {
+function runClaude(repo, prompt, { resume = null, onProgress = () => {}, timeoutMs = 20 * 60_000, workerId = '' } = {}) {
   return new Promise((resolve) => {
     // 容器内显式 IS_SANDBOX 才全 bypass；裸机默认白名单+acceptEdits（改不崩、跑不崩）
     const fullBypass = sandboxed && env.WORKER_FULL_BYPASS === '1';
@@ -88,7 +92,18 @@ function runClaude(repo, prompt, { resume = null, onProgress = () => {}, timeout
     if (fullBypass) args.push('--dangerously-skip-permissions');
     else args.push('--permission-mode', 'acceptEdits', '--allowedTools', SAFE_TOOLS);
     if (resume) args.push('--resume', resume);
-    const child = spawn(CLAUDE_BIN, args, { cwd: repo, env: ccEnv, stdio: ['ignore', 'pipe', 'pipe'] });
+    let file = CLAUDE_BIN, execArgs = args;
+    if (SANDBOX_ENABLED) {
+      execArgs = buildSandboxArgs({
+        unit: unitName(`agent-${NODE_ID}`, workerId || Date.now().toString(36)),
+        workdir: repo,
+        home: join(repo, '.home'),
+        command: CLAUDE_BIN,
+        args,
+      });
+      file = 'systemd-run';
+    }
+    const child = spawn(file, execArgs, { cwd: repo, env: ccEnv, stdio: ['ignore', 'pipe', 'pipe'] });
     let buf = '', lastEmit = 0, finalText = '', sessionId = resume, errored = null, done = false;
     const timer = setTimeout(() => { child.kill('SIGTERM'); errored = 'cc 超时被终止'; }, timeoutMs);
     const finish = (ok) => { if (done) return; done = true; clearTimeout(timer); resolve({ ok, summary: (finalText || errored || '').slice(0, 4000), sessionId }); };
@@ -145,7 +160,7 @@ async function createWorker(msg) {
   try { wt = ensureWorktree(worker_id, repo); }
   catch (e) { send({ t: 'worker.create_failed', worker_id, reason: 'worktree 创建失败：' + e.message }); return; }
   const initPrompt = `你是雁阵工雁「${name || worker_id}」，使命：${msg.purpose || '通用平台工雁'}。负责平台 ${platform || '通用'}，仓库 ${repo}。这是初始化会话：用 ls 与 git log --oneline -5 快速熟悉仓库结构，然后只回复一句"就绪"。不要修改任何文件。`;
-  const r = await runClaude(wt, initPrompt, { timeoutMs: 5 * 60_000 });
+  const r = await runClaude(wt, initPrompt, { timeoutMs: 5 * 60_000, workerId: worker_id });
   if (!r.sessionId) { send({ t: 'worker.create_failed', worker_id, reason: r.summary || 'cc 未返回 session_id' }); return; }
   state.workers[worker_id] = { session_id: r.sessionId, platform, repo, wt, name: name || worker_id };
   saveState();
@@ -171,6 +186,7 @@ async function runTask(msg) {
 请完成这张需求单。`;
   const p = runClaude(repo, prompt, {
     resume: w.session_id,
+    workerId: worker_id,
     onProgress: (step, message) => send({ t: 'progress', ticket_id: ticket.id, worker_id, step, message }),
   });
   busy.set(worker_id, p);
