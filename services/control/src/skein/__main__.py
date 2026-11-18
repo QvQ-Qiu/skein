@@ -29,6 +29,8 @@ def build() -> tuple:
         llm=llm,
         direct_model=cfg.direct_model,
         route_model=cfg.route_model,
+        forum_base=cfg.forum_base,
+        internal_token=cfg.forum_token,
     )
     return app, cfg
 

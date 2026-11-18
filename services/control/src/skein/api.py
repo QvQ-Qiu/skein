@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import base64
 import binascii
+import hashlib
+import json
 import sqlite3
 import time
 
@@ -12,8 +14,9 @@ from pydantic import BaseModel, Field
 
 from skein import db
 from skein.channel import ChannelHub
+from skein.compat import ForumCompatWriter
 from skein.host import RouterHost
-from skein.outbox import EmitResult, Outbox
+from skein.outbox import EffectState, EmitResult, Outbox, get
 from skein.session_store import SessionStore, TurnConflict
 from skein.summary import summary as build_summary
 
@@ -41,6 +44,10 @@ class ReviewIn(BaseModel):
     decision: str
 
 
+class FeaturedIn(BaseModel):
+    post_ids: list[int]
+
+
 def create_app(
     conn: sqlite3.Connection,
     blob_root: str,
@@ -50,10 +57,13 @@ def create_app(
     direct_model: str = "direct",
     route_model: str = "route",
     platform_repos: dict[str, str] | None = None,
+    forum_base: str = "",
+    internal_token: str = "",
 ) -> FastAPI:
     app = FastAPI(title="skein-control", version="0.1.0")
     sessions = SessionStore(conn, blob_root)
     outbox = Outbox(conn, writer)
+    compat = Outbox(conn, ForumCompatWriter(forum_base)) if forum_base else None
     host = RouterHost(conn, llm, direct_model, route_model) if llm is not None else None
     hub = ChannelHub(conn, token, platform_repos or {})
 
@@ -90,6 +100,43 @@ def create_app(
             conn, "human", "review", {"ticket_id": ticket_id, "decision": body.decision}
         )
         return {"ticket_id": ticket_id, "status": status}
+
+    @app.post("/internal/featured")
+    def compat_featured(body: FeaturedIn, x_internal_token: str = Header(default="")) -> dict:
+        if not internal_token or x_internal_token != internal_token:
+            raise HTTPException(status_code=403, detail="forbidden")
+        if compat is None:
+            raise HTTPException(status_code=503, detail="forum not configured")
+        marked = 0
+        for post_id in body.post_ids:
+            key = f"featured:{post_id}"
+            existing = get(conn, key)
+            if existing and existing.state == EffectState.CONFIRMED:
+                marked += 1
+                continue
+            result = compat.emit(key, "featured", str(post_id), {"token": internal_token})
+            if result != EmitResult.FAILED:
+                marked += 1
+        return {"code": 200, "data": {"marked": marked}}
+
+    @app.post("/api/auth/post")
+    def compat_post(body: dict, authorization: str = Header(default="")) -> dict:
+        if compat is None:
+            raise HTTPException(status_code=503, detail="forum not configured")
+        material = json.dumps(
+            {k: body.get(k) for k in ("title", "content", "partition", "isPrivate", "userTelephone")},
+            sort_keys=True,
+            ensure_ascii=False,
+        )
+        key = "post:" + hashlib.sha256(material.encode()).hexdigest()[:32]
+        existing = get(conn, key)
+        if existing and existing.state == EffectState.CONFIRMED and existing.response:
+            return existing.response
+        result = compat.emit(key, "post", key, {"body": body, "authorization": authorization})
+        if result == EmitResult.FAILED:
+            raise HTTPException(status_code=502, detail="forum write failed")
+        stored = get(conn, key)
+        return stored.response if stored and stored.response else {"code": 200, "data": None}
 
     if host is not None:
 
