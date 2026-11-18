@@ -89,3 +89,20 @@ def test_watermark_advances(conn):
     Ingestor(conn, FakeSource(items())).poll()
     row = conn.execute("SELECT value FROM kv WHERE key = 'wm:forum'").fetchone()
     assert row["value"] == "102.0"
+
+
+def test_handler_called_only_for_process_events(conn):
+    seen = []
+    Ingestor(conn, FakeSource(items()), on_process=lambda e: seen.append(e.origin_id)).poll()
+    assert seen == ["c2"]
+
+
+def test_handler_error_does_not_stop_ingestion(conn):
+    def boom(event):
+        raise RuntimeError("model down")
+
+    written = Ingestor(conn, FakeSource(items()), on_process=boom).poll()
+    assert written == 3
+    assert conn.execute("SELECT COUNT(*) AS n FROM events").fetchone()["n"] == 3
+    row = conn.execute("SELECT action FROM audit WHERE action = 'handler_error'").fetchone()
+    assert row is not None

@@ -10,6 +10,8 @@ from skein import db
 from skein.config import Config
 from skein.forum_source import ForumSource, make_mysql_query
 from skein.ingest import Ingestor
+from skein.llm_http import HttpLLM
+from skein.shadow import ShadowDispatcher
 
 log = logging.getLogger("skein.poll")
 
@@ -25,7 +27,14 @@ def build(cfg: Config) -> Ingestor:
         cfg.forum_db_password,
         cfg.forum_db_name,
     )
-    return Ingestor(conn, ForumSource(query))
+    handler = None
+    if cfg.shadow:
+        if cfg.llm_base and cfg.llm_key:
+            handler = ShadowDispatcher(conn, HttpLLM(cfg.llm_base, cfg.llm_key), cfg.route_model)
+            log.info("影子派单已开启，只记录判断，不建单")
+        else:
+            log.warning("SKEIN_SHADOW 已开但没有配置模型网关，影子派单不生效")
+    return Ingestor(conn, ForumSource(query), on_process=handler)
 
 
 def main() -> None:

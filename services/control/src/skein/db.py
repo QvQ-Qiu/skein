@@ -12,7 +12,7 @@ import time
 import uuid
 from pathlib import Path
 
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS events (
@@ -140,6 +140,17 @@ CREATE TABLE IF NOT EXISTS kv (
     key         TEXT PRIMARY KEY,
     value       TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS shadow_decisions (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    source      TEXT NOT NULL,
+    origin_id   TEXT NOT NULL,
+    action      TEXT NOT NULL,
+    note        TEXT,
+    created_at  REAL NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_shadow_origin ON shadow_decisions (source, origin_id);
 
 CREATE INDEX IF NOT EXISTS idx_events_thread ON events (thread_id);
 CREATE INDEX IF NOT EXISTS idx_tickets_status ON tickets (status);

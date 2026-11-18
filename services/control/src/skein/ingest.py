@@ -7,10 +7,10 @@ from __future__ import annotations
 
 import sqlite3
 from dataclasses import dataclass
-from typing import Protocol
+from typing import Callable, Protocol
 
 from skein import db, store
-from skein.admission import DEFAULT_POLICY, Event, SourcePolicy, decide
+from skein.admission import DEFAULT_POLICY, Event, SourcePolicy, Verdict, decide
 
 
 @dataclass(frozen=True)
@@ -37,10 +37,12 @@ class Ingestor:
         conn: sqlite3.Connection,
         source: Source,
         policy: SourcePolicy = DEFAULT_POLICY,
+        on_process: Callable[[Event], object] | None = None,
     ) -> None:
         self._conn = conn
         self._source = source
         self._policy = policy
+        self._on_process = on_process
 
     def poll(self, limit: int = 100) -> int:
         key = f"wm:{self._source.name}"
@@ -74,6 +76,17 @@ class Ingestor:
                 decision.verdict.value,
             )
             written += 1
+
+            if decision.verdict is Verdict.PROCESS and self._on_process is not None:
+                try:
+                    self._on_process(event)
+                except Exception as exc:  # noqa: BLE001 - 处理失败不阻断采集
+                    db.record_audit(
+                        self._conn,
+                        "ingest",
+                        "handler_error",
+                        {"origin_id": item.origin_id, "error": str(exc)},
+                    )
 
         if items:
             store.kv_set(self._conn, key, str(latest))
