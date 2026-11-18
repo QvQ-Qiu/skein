@@ -26,6 +26,10 @@ class Config:
     poll_interval: int = 60
     shadow: bool = False
     dispatch: bool = False
+    schedules: str = ""
+    job_commands: str = ""
+    driver_enabled: bool = False
+    job_timeout: int = 14400
 
     @classmethod
     def from_env(cls, env: dict[str, str] | None = None) -> Config:
@@ -50,4 +54,8 @@ class Config:
             poll_interval=int(source.get("SKEIN_POLL_INTERVAL", base.poll_interval)),
             shadow=source.get("SKEIN_SHADOW", "0") in ("1", "true", "yes"),
             dispatch=source.get("SKEIN_DISPATCH", "0") in ("1", "true", "yes"),
+            schedules=source.get("SKEIN_SCHEDULES", base.schedules),
+            job_commands=source.get("SKEIN_JOB_COMMANDS", base.job_commands),
+            driver_enabled=source.get("SKEIN_DRIVER", "0") in ("1", "true", "yes"),
+            job_timeout=int(source.get("SKEIN_JOB_TIMEOUT", base.job_timeout)),
         )

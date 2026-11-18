@@ -18,16 +18,16 @@
 | 影子派单 | `skein/shadow.py` | 真模型判断，只记录，零副作用 |
 | 节点通道 | `skein/channel.py` | WebSocket：注册、心跳、建 worker、派单、回报 |
 | 调度 | `skein/scheduler.py` | 在线窗口、容量、平台匹配 |
+| 作业驱动 | `skein/driver.py`、`skein/runs.py` | 到点开工、按 (job, day) 去重、线程执行 |
+| 写入口兼容 | `skein/compat.py` | 加精按帖幂等、发帖按内容哈希幂等 |
 | 通道 | `skein/channels.py` | 论坛内部口写入，禁用系统代理 |
 | 模型客户端 | `skein/llm_http.py` | OpenAI 兼容网关，强制 JSON |
 
 ## 二、还没实现的
 
-- **Outbox 接管日报与精华帖**：通道与幂等已就绪，作业侧还没切过来。
 - **Watchdog**：信号采集、金丝雀、提示词写入都没做。
 - **集市云执行环境**：YatTerra 客户端未写，token 未拿到。
 - **面板**：`services/console` 还是旧代码，未接新接口。
-- **定时作业驱动**：`runs` 表有结构，没有驱动。
 
 ## 三、怎么跑
 
@@ -53,6 +53,12 @@ make run-poll    # 采集循环
 | `SKEIN_FORUM_DB_*` | 本机 3506 | 论坛只读库（采集用） |
 | `SKEIN_POLL_INTERVAL` | `60` | 采集间隔（秒） |
 | `SKEIN_SHADOW` | `0` | 开影子派单；需要模型网关 |
+| `SKEIN_DISPATCH` | `0` | 开真派单：放行事件建单 |
+| `SKEIN_SCHEDULES` | 空 | 作业时刻表 JSON：`[{"job":"daily","at":"09:15"}]` |
+| `SKEIN_JOB_COMMANDS` | 空 | 作业命令 JSON：`{"daily":"python main.py daily"}` |
+| `SKEIN_DRIVER` | `0` | 启动定时作业线程 |
+| `SKEIN_JOB_TIMEOUT` | `14400` | 单个作业最长运行秒数 |
+| `SKEIN_PLATFORM_REPOS` | 空 | 平台 → 节点仓库路径的 JSON |
 
 ## 四、接口
 
@@ -65,6 +71,11 @@ make run-poll    # 采集循环
 | GET | `/internal/summary` | 有 | 计数概览 |
 | POST | `/internal/tickets/{id}/dispatch` | 有 | 派给在线节点 |
 | POST | `/internal/tickets/{id}/review` | 有 | approve / reject |
+| POST | `/internal/runs` | 有 | 开一次作业运行（按 job+day 去重） |
+| POST | `/internal/runs/{id}/finish` | 有 | 落运行结果 |
+| GET | `/internal/runs` | 有 | 最近运行 |
+| POST | `/internal/featured` | X-Internal-Token | 兼容：批量加精，按帖幂等 |
+| POST | `/api/auth/post` | Bearer 透传 | 兼容：用户发帖，按内容哈希幂等 |
 | WS | `/api/agent/channel` | 协议内 token | 节点反向拨入 |
 
 节点协议（与旧雁阵兼容）：`node.register` / `node.heartbeat` / `worker.created` / `ack` / `result`；服务端下发 `worker.create` / `dispatch`。

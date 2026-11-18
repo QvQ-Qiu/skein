@@ -12,7 +12,7 @@ import time
 from fastapi import Depends, FastAPI, Header, HTTPException, WebSocket
 from pydantic import BaseModel, Field
 
-from skein import db
+from skein import db, runs
 from skein.channel import ChannelHub
 from skein.compat import ForumCompatWriter
 from skein.host import RouterHost
@@ -48,6 +48,16 @@ class FeaturedIn(BaseModel):
     post_ids: list[int]
 
 
+class RunIn(BaseModel):
+    job: str
+    day: str
+
+
+class FinishIn(BaseModel):
+    status: str
+    detail: str | None = None
+
+
 def create_app(
     conn: sqlite3.Connection,
     blob_root: str,
@@ -78,6 +88,25 @@ def create_app(
     @app.get("/internal/summary", dependencies=[Depends(auth)])
     def internal_summary() -> dict:
         return build_summary(conn)
+
+    @app.post("/internal/runs", dependencies=[Depends(auth)])
+    def start_run(body: RunIn) -> dict:
+        run_id = runs.start(conn, body.job, body.day)
+        return {"run_id": run_id, "existing": run_id is None}
+
+    @app.post("/internal/runs/{run_id}/finish", dependencies=[Depends(auth)])
+    def finish_run(run_id: str, body: FinishIn) -> dict:
+        runs.finish(conn, run_id, body.status, body.detail)
+        return {"run_id": run_id, "status": body.status}
+
+    @app.get("/internal/runs", dependencies=[Depends(auth)])
+    def list_runs(limit: int = 20) -> dict:
+        return {
+            "runs": [
+                {"id": r.id, "job": r.job, "day": r.day, "status": r.status, "detail": r.detail}
+                for r in runs.recent(conn, limit)
+            ]
+        }
 
     @app.websocket("/api/agent/channel")
     async def agent_channel(ws: WebSocket) -> None:
