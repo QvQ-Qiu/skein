@@ -10,3 +10,8 @@ public/
 *.db-shm
 *.db-wal
 .DS_Store
+__pycache__/
+.pytest_cache/
+.venv/
+*.pyc
+.ruff_cache/
