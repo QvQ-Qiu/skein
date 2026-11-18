@@ -71,6 +71,18 @@ make run-poll    # 采集循环
 
 三份权威的边界不混：transcript 在内容寻址文件，工单在领域库，帖与评论在论坛 MySQL。
 
-## 六、下一步
+## 六、影子对比
+
+影子派单只记录判断，是否可靠要靠人工对照：
+
+```bash
+make review-export   # 导出待标注样本到 labels.csv
+# 填写 expected_action 列（route / attach / ignore / stop / note）
+make review-report   # 输出一致率、混淆矩阵与分歧列表
+```
+
+报告包含：影子总数、已标注数、覆盖率、一致率、混淆矩阵（行=人工，列=模型）以及前 20 条分歧。
+
+## 七、下一步
 
 按 `docs/migration.md` 的 S3–S5：影子对比 → 准入接管采集 → Session 同步接节点。

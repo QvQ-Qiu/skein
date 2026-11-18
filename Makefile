@@ -1,4 +1,4 @@
-.PHONY: help test lint run-control run-poll run-agent build-console
+.PHONY: help test lint run-control run-poll run-agent build-console review-export review-report
 
 help:
 	@echo "test           控制面测试"
@@ -19,6 +19,12 @@ run-control:
 
 run-poll:
 	cd services/control && python -m skein.poll
+
+review-export:
+	cd services/control && python -m skein.review export --out labels.csv
+
+review-report:
+	cd services/control && python -m skein.review report --labels labels.csv
 
 run-agent:
 	cd services/node-agent && node node-agent.mjs
