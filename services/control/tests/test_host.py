@@ -125,3 +125,17 @@ def test_dedup_key_attaches_instead_of_second_ticket(conn):
     )
     assert second.action == "attached"
     assert ticket_count(conn) == 1
+
+
+def test_handle_admitted_does_not_re_record_event(conn):
+    from skein import store
+    from skein.host import DispatchHandler
+
+    h = host(conn, FakeLLM(route={"action": "route"}))
+    thread_id = store.ensure_thread(conn, "forum_post", "p9")
+    event = Event(source="forum_comment", origin_id="c9", text="帮忙", mentioned=True, parent_id="p9")
+    result = DispatchHandler(h)(event, thread_id)
+    assert result.action == "dispatch"
+    assert conn.execute("SELECT COUNT(*) FROM events").fetchone()[0] == 0
+    assert conn.execute("SELECT COUNT(*) FROM tickets").fetchone()[0] == 1
+    assert conn.execute("SELECT COUNT(*) FROM subscriptions").fetchone()[0] == 1

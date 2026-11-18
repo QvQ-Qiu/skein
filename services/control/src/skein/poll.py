@@ -9,6 +9,7 @@ from pathlib import Path
 from skein import db
 from skein.config import Config
 from skein.forum_source import ForumSource, make_mysql_query
+from skein.host import DispatchHandler, RouterHost
 from skein.ingest import Ingestor
 from skein.llm_http import HttpLLM
 from skein.shadow import ShadowDispatcher
@@ -28,9 +29,13 @@ def build(cfg: Config) -> Ingestor:
         cfg.forum_db_name,
     )
     handler = None
-    if cfg.shadow:
-        if cfg.llm_base and cfg.llm_key:
-            handler = ShadowDispatcher(conn, HttpLLM(cfg.llm_base, cfg.llm_key), cfg.route_model)
+    llm = HttpLLM(cfg.llm_base, cfg.llm_key) if cfg.llm_base and cfg.llm_key else None
+    if cfg.dispatch and llm is not None:
+        handler = DispatchHandler(RouterHost(conn, llm, cfg.direct_model, cfg.route_model))
+        log.info("真派单已开启：放行事件会建单")
+    elif cfg.shadow:
+        if llm is not None:
+            handler = ShadowDispatcher(conn, llm, cfg.route_model)
             log.info("影子派单已开启，只记录判断，不建单")
         else:
             log.warning("SKEIN_SHADOW 已开但没有配置模型网关，影子派单不生效")

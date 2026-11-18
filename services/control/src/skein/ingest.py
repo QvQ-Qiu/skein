@@ -38,7 +38,7 @@ class Ingestor:
         conn: sqlite3.Connection,
         source: Source,
         policy: SourcePolicy = DEFAULT_POLICY,
-        on_process: Callable[[Event], object] | None = None,
+        on_process: Callable[[Event, str], object] | None = None,
     ) -> None:
         self._conn = conn
         self._source = source
@@ -80,7 +80,7 @@ class Ingestor:
 
             if decision.verdict is Verdict.PROCESS and self._on_process is not None:
                 try:
-                    self._on_process(event)
+                    self._on_process(event, thread_id)
                 except Exception as exc:  # noqa: BLE001 - 处理失败不阻断采集
                     db.record_audit(
                         self._conn,

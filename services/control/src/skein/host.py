@@ -69,6 +69,10 @@ class RouterHost:
         if decision.verdict is not Verdict.PROCESS:
             return HostResult(decision.verdict.value)
 
+        return self.handle_admitted(event, thread_id)
+
+    def handle_admitted(self, event: Event, thread_id: str) -> HostResult:
+        """事件已被准入放行、并已落库；这里只做判定与建单。"""
         raw = self._llm.complete(
             build_route_request(
                 self._route_model,
@@ -94,6 +98,12 @@ class RouterHost:
             dedup_key=dedup_key,
         )
         store.subscribe(self._conn, thread_id, ticket_id)
+        db.record_audit(
+            self._conn,
+            "router",
+            "dispatch",
+            {"ticket_id": ticket_id, "from": event.source, "origin_id": event.origin_id},
+        )
         return HostResult("dispatch", ticket_id=ticket_id)
 
     @staticmethod
@@ -103,3 +113,13 @@ class RouterHost:
             if isinstance(content, str) and content.strip():
                 return content.strip()[:60]
         return "聊天分派"
+
+
+class DispatchHandler:
+    """把采集的 on_process 接到宿主：事件已入库，这里只做判定与建单。"""
+
+    def __init__(self, host: RouterHost) -> None:
+        self._host = host
+
+    def __call__(self, event: Event, thread_id: str) -> HostResult:
+        return self._host.handle_admitted(event, thread_id)

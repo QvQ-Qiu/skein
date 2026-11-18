@@ -25,6 +25,7 @@ class Config:
     forum_db_name: str = "ssemarket"
     poll_interval: int = 60
     shadow: bool = False
+    dispatch: bool = False
 
     @classmethod
     def from_env(cls, env: dict[str, str] | None = None) -> Config:
@@ -48,4 +49,5 @@ class Config:
             forum_db_name=source.get("SKEIN_FORUM_DB_NAME", base.forum_db_name),
             poll_interval=int(source.get("SKEIN_POLL_INTERVAL", base.poll_interval)),
             shadow=source.get("SKEIN_SHADOW", "0") in ("1", "true", "yes"),
+            dispatch=source.get("SKEIN_DISPATCH", "0") in ("1", "true", "yes"),
         )

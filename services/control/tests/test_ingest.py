@@ -93,12 +93,12 @@ def test_watermark_advances(conn):
 
 def test_handler_called_only_for_process_events(conn):
     seen = []
-    Ingestor(conn, FakeSource(items()), on_process=lambda e: seen.append(e.origin_id)).poll()
+    Ingestor(conn, FakeSource(items()), on_process=lambda e, tid: seen.append(e.origin_id)).poll()
     assert seen == ["c2"]
 
 
 def test_handler_error_does_not_stop_ingestion(conn):
-    def boom(event):
+    def boom(event, thread_id):
         raise RuntimeError("model down")
 
     written = Ingestor(conn, FakeSource(items()), on_process=boom).poll()
