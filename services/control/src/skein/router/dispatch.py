@@ -8,6 +8,12 @@ from skein.llm import LLMClient
 
 ROUTE_TOOLS = ("route", "attach", "ignore", "stop", "note")
 
+ROUTE_SYSTEM_PROMPT = (
+    "你是事件入口。只输出 JSON，action 取 route / attach / ignore / stop / note 之一。"
+    "需要建单时用 route；已经在办的同一件事用 attach；不值得处理用 ignore。"
+    "你不能执行任务，只能做决定。"
+)
+
 FORBIDDEN_TOOLS = ("bash", "read", "write", "sql", "post", "comment", "edit")
 
 

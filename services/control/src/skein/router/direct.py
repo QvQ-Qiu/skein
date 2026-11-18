@@ -27,6 +27,12 @@ TOOL_BLOCK_TYPES = ("tool_use", "tool_call", "tool_result")
 
 DISPATCH_RESULT_TEXT = "收到，我转给负责的同事处理。"
 
+DIRECT_SYSTEM_PROMPT = (
+    "你是 Router 的对话入口。只输出一个 JSON 对象，二选一："
+    '{"action":"say","text":"..."} 或 {"action":"dispatch"}。'
+    "你没有工具，也不能要求使用工具；需要动手时只能返回 dispatch。"
+)
+
 
 @dataclass(frozen=True)
 class Reply:
@@ -122,6 +128,7 @@ class DirectRouter:
         self._model = model
 
     def reply(self, messages: list[dict]) -> Reply:
-        request = build_direct_request(self._model, messages)
+        payload = [{"role": "system", "content": DIRECT_SYSTEM_PROMPT}, *messages]
+        request = build_direct_request(self._model, payload)
         raw = self._llm.complete(request)
         return parse_direct_response(raw)

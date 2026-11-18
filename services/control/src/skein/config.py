@@ -16,6 +16,8 @@ class Config:
     route_model: str = "route"
     forum_base: str = "http://127.0.0.1:8080"
     forum_token: str = ""
+    llm_base: str = ""
+    llm_key: str = ""
 
     @classmethod
     def from_env(cls, env: dict[str, str] | None = None) -> "Config":
@@ -30,4 +32,6 @@ class Config:
             route_model=source.get("SKEIN_ROUTE_MODEL", base.route_model),
             forum_base=source.get("SKEIN_FORUM_BASE", base.forum_base),
             forum_token=source.get("SKEIN_FORUM_TOKEN", base.forum_token),
+            llm_base=source.get("SKEIN_LLM_BASE", base.llm_base),
+            llm_key=source.get("SKEIN_LLM_KEY", base.llm_key),
         )

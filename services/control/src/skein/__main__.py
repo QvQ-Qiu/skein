@@ -10,6 +10,7 @@ from skein import db
 from skein.api import create_app
 from skein.channels import HttpWriter
 from skein.config import Config
+from skein.llm_http import HttpLLM
 
 
 def build() -> tuple:
@@ -19,7 +20,17 @@ def build() -> tuple:
     conn = db.connect(cfg.db_path)
     db.migrate(conn)
     writer = HttpWriter(cfg.forum_base, cfg.forum_token)
-    return create_app(conn, cfg.blob_root, cfg.token, writer), cfg
+    llm = HttpLLM(cfg.llm_base, cfg.llm_key) if cfg.llm_base and cfg.llm_key else None
+    app = create_app(
+        conn,
+        cfg.blob_root,
+        cfg.token,
+        writer,
+        llm=llm,
+        direct_model=cfg.direct_model,
+        route_model=cfg.route_model,
+    )
+    return app, cfg
 
 
 def main() -> None:

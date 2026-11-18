@@ -63,3 +63,48 @@ def test_emit_is_single_write(client):
     second = client.post("/internal/outbox/emit", json=body, headers=auth())
     assert second.json()["result"] == EmitResult.ALREADY
     assert len(client.calls) == 1
+
+
+class FakeLLM:
+    def __init__(self, response):
+        self.response = response
+        self.requests = []
+
+    def complete(self, request):
+        self.requests.append(request)
+        return self.response
+
+
+def make_chat_client(tmp_path, response):
+    conn = db.connect(tmp_path / "chat.db")
+    db.migrate(conn)
+    app = create_app(
+        conn, str(tmp_path / "blobs"), TOKEN, lambda *a: {}, llm=FakeLLM(response)
+    )
+    return TestClient(app), conn
+
+
+def test_chat_say(tmp_path):
+    client, conn = make_chat_client(tmp_path, {"action": "say", "text": "你好"})
+    with client:
+        response = client.post(
+            "/internal/chat",
+            json={"messages": [{"role": "user", "content": "在吗"}]},
+            headers=auth(),
+        )
+        assert response.json() == {"action": "say", "text": "你好", "ticket_id": None}
+    conn.close()
+
+
+def test_chat_dispatch_creates_ticket(tmp_path):
+    client, conn = make_chat_client(tmp_path, {"action": "dispatch"})
+    with client:
+        response = client.post(
+            "/internal/chat",
+            json={"messages": [{"role": "user", "content": "帮我修个 bug"}]},
+            headers=auth(),
+        )
+        assert response.json()["action"] == "dispatch"
+        assert response.json()["ticket_id"]
+        assert conn.execute("SELECT COUNT(*) AS n FROM tickets").fetchone()["n"] == 1
+    conn.close()

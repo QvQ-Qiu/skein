@@ -9,8 +9,13 @@ import sqlite3
 from fastapi import Depends, FastAPI, Header, HTTPException
 from pydantic import BaseModel, Field
 
+from skein.host import RouterHost
 from skein.outbox import EmitResult, Outbox
 from skein.session_store import SessionStore, TurnConflict
+
+
+class ChatIn(BaseModel):
+    messages: list[dict]
 
 
 class TurnIn(BaseModel):
@@ -33,12 +38,14 @@ def create_app(
     blob_root: str,
     token: str,
     writer,
-    effects=None,
+    llm=None,
+    direct_model: str = "direct",
+    route_model: str = "route",
 ) -> FastAPI:
     app = FastAPI(title="skein-control", version="0.1.0")
     sessions = SessionStore(conn, blob_root)
     outbox = Outbox(conn, writer)
-    effect_rows = effects if effects is not None else conn
+    host = RouterHost(conn, llm, direct_model, route_model) if llm is not None else None
 
     def auth(x_skein_token: str = Header(default="")) -> None:
         if not token or x_skein_token != token:
@@ -47,6 +54,13 @@ def create_app(
     @app.get("/health/live")
     def live() -> dict:
         return {"status": "ok"}
+
+    if host is not None:
+
+        @app.post("/internal/chat", dependencies=[Depends(auth)])
+        def chat(body: ChatIn) -> dict:
+            result = host.chat(body.messages)
+            return {"action": result.action, "text": result.text, "ticket_id": result.ticket_id}
 
     @app.post("/internal/worker/turn", dependencies=[Depends(auth)])
     def upload_turn(body: TurnIn) -> dict:

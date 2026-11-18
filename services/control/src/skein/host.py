@@ -9,7 +9,7 @@ from skein import db, store
 from skein.admission import DEFAULT_POLICY, Event, SourcePolicy, Verdict, decide
 from skein.llm import LLMClient
 from skein.router.direct import DISPATCH_RESULT_TEXT, DirectRouter
-from skein.router.dispatch import build_route_request, parse_route_response
+from skein.router.dispatch import ROUTE_SYSTEM_PROMPT, build_route_request, parse_route_response
 
 
 @dataclass(frozen=True)
@@ -71,7 +71,10 @@ class RouterHost:
         raw = self._llm.complete(
             build_route_request(
                 self._route_model,
-                [{"role": "user", "content": event.text}],
+                [
+                    {"role": "system", "content": ROUTE_SYSTEM_PROMPT},
+                    {"role": "user", "content": event.text},
+                ],
             )
         )
         route = parse_route_response(raw)
