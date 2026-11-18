@@ -1,0 +1,17 @@
+[Unit]
+Description=Yanzhen Super Agent Router (头雁节点：采集+分类+controller+面板)
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/root/yanzhen
+ExecStart=/root/yanzhen/node/bin/node server/index.js
+Restart=always
+RestartSec=5
+Environment=NODE_ENV=production
+# 密钥由应用自读 WorkingDirectory/.env（600 权限）
+LimitNOFILE=65536
+
+[Install]
+WantedBy=multi-user.target
