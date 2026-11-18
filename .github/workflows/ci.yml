@@ -19,3 +19,15 @@ jobs:
       - run: pip install -e ".[dev]"
       - run: ruff check src tests
       - run: python -m pytest -q
+
+  node-agent:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: services/node-agent
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: node --test "test/*.test.mjs"

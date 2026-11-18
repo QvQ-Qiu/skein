@@ -15,6 +15,7 @@ import { hostname, networkInterfaces } from 'node:os';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { TranscriptSync } from './transcript-sync.mjs';
 
 const env = process.env;
 const CONTROLLER_URL = env.CONTROLLER_URL || 'ws://127.0.0.1:3030/api/agent/channel';
@@ -41,6 +42,16 @@ const stateFile = join(stateDir, 'node-state.json');
 let state = { workers: {} };
 try { state = JSON.parse(readFileSync(stateFile, 'utf8')); } catch {}
 const saveState = () => writeFileSync(stateFile, JSON.stringify(state, null, 2));
+
+// transcript 同步：控制面地址未配置时整条链路不启用
+const SKEIN_CONTROL_URL = env.SKEIN_CONTROL_URL || '';
+const SKEIN_TOKEN = env.SKEIN_TOKEN || '';
+const transcriptSync = SKEIN_CONTROL_URL
+  ? new TranscriptSync({ url: SKEIN_CONTROL_URL, token: SKEIN_TOKEN, queuePath: join(stateDir, 'transcript-queue.jsonl') })
+  : null;
+if (transcriptSync) {
+  setInterval(() => transcriptSync.flush().catch((e) => console.log('[node] transcript 补传失败', e.message)), 30_000);
+}
 
 const busy = new Map();      // worker_id → child process
 const cancelled = new Set();
@@ -178,6 +189,18 @@ async function runTask(msg) {
     t: 'result', ticket_id: ticket.id, worker_id,
     result: { ok: cc.ok, branch: branchNow, base_commit: baseCommit, commits, diffstat, pushed: PUSH_BRANCH && !!commits, summary: cc.summary, session_id: cc.sessionId, tests: '见总结（cc 自测报告）' },
   });
+  if (transcriptSync) {
+    const sessionId = cc.sessionId || w.session_id;
+    const turn = (w.turn || 0) + 1;
+    w.turn = turn;
+    saveState();
+    let headSha = '';
+    try { headSha = git(repo, 'rev-parse', 'HEAD'); } catch {}
+    transcriptSync
+      .syncTurn({ sessionId, turnIndex: turn, headSha, branch: branchNow })
+      .then((r) => { if (!r.ok && r.reason !== 'no_transcript') console.log('[node] transcript 已入队', sessionId.slice(0, 8), turn); })
+      .catch((e) => console.log('[node] transcript 同步异常', e.message));
+  }
 }
 
 /* ---- worker 直连：peer 服务 + 名册互拨 + room 发言 ---- */
