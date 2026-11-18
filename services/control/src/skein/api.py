@@ -12,7 +12,7 @@ import time
 from fastapi import Depends, FastAPI, Header, HTTPException, WebSocket
 from pydantic import BaseModel, Field
 
-from skein import db, runs
+from skein import db, prompts, runs
 from skein.channel import ChannelHub
 from skein.compat import ForumCompatWriter
 from skein.host import RouterHost
@@ -56,6 +56,18 @@ class RunIn(BaseModel):
 class FinishIn(BaseModel):
     status: str
     detail: str | None = None
+
+
+class PromptProposeIn(BaseModel):
+    part: str
+    text: str
+    base_revision: int
+    source: str = "watchdog"
+    signal_id: str | None = None
+
+
+class PromptActionIn(BaseModel):
+    part: str
 
 
 def create_app(
@@ -107,6 +119,42 @@ def create_app(
                 for r in runs.recent(conn, limit)
             ]
         }
+
+    @app.get("/internal/prompts", dependencies=[Depends(auth)])
+    def list_prompts() -> dict:
+        return {"prompts": [prompts.state(conn, part) for part in prompts.EDITABLE_PARTS]}
+
+    @app.post("/internal/prompts/propose", dependencies=[Depends(auth)])
+    def propose_prompt(body: PromptProposeIn) -> dict:
+        try:
+            revision = prompts.propose(
+                conn, body.part, body.text, body.base_revision, body.source, body.signal_id
+            )
+        except prompts.PromptFrozen as exc:
+            raise HTTPException(status_code=423, detail=str(exc))
+        except prompts.PromptConflict as exc:
+            raise HTTPException(status_code=409, detail=str(exc))
+        except prompts.PromptError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+        return {"revision": revision, "part": body.part}
+
+    @app.post("/internal/prompts/promote", dependencies=[Depends(auth)])
+    def promote_prompt(body: PromptActionIn) -> dict:
+        try:
+            revision = prompts.promote(conn, body.part)
+        except prompts.PromptError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+        return {"revision": revision, "part": body.part}
+
+    @app.post("/internal/prompts/rollback", dependencies=[Depends(auth)])
+    def rollback_prompt(body: PromptActionIn) -> dict:
+        prompts.rollback(conn, body.part)
+        return prompts.state(conn, body.part)
+
+    @app.post("/internal/prompts/unfreeze", dependencies=[Depends(auth)])
+    def unfreeze_prompt(body: PromptActionIn) -> dict:
+        prompts.unfreeze(conn, body.part)
+        return prompts.state(conn, body.part)
 
     @app.websocket("/api/agent/channel")
     async def agent_channel(ws: WebSocket) -> None:
