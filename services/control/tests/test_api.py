@@ -108,3 +108,18 @@ def test_chat_dispatch_creates_ticket(tmp_path):
         assert response.json()["ticket_id"]
         assert conn.execute("SELECT COUNT(*) AS n FROM tickets").fetchone()["n"] == 1
     conn.close()
+
+
+def test_summary_requires_auth(client):
+    assert client.get("/internal/summary").status_code == 401
+
+
+def test_summary_reflects_writes(client):
+    client.post(
+        "/internal/outbox/emit",
+        json={"key": "k9", "kind": "post", "object": "o9", "payload": {}},
+        headers=auth(),
+    )
+    body = client.get("/internal/summary", headers=auth()).json()
+    assert body["effects"]["by_state"]["confirmed"] == 1
+    assert body["events"]["total"] == 0

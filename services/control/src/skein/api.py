@@ -12,6 +12,7 @@ from pydantic import BaseModel, Field
 from skein.host import RouterHost
 from skein.outbox import EmitResult, Outbox
 from skein.session_store import SessionStore, TurnConflict
+from skein.summary import summary as build_summary
 
 
 class ChatIn(BaseModel):
@@ -54,6 +55,10 @@ def create_app(
     @app.get("/health/live")
     def live() -> dict:
         return {"status": "ok"}
+
+    @app.get("/internal/summary", dependencies=[Depends(auth)])
+    def internal_summary() -> dict:
+        return build_summary(conn)
 
     if host is not None:
 
