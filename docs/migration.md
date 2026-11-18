@@ -45,3 +45,16 @@ S4 之后新旧控制面并存一段时间：旧 Node 进程继续跑工单，�
 - 不迁论坛 MySQL。
 - 不把工单迁进 PG。
 - 不在同一窗口改面板与调度。
+
+## 4. 服务器工作树布局
+
+`/root/yanzhen` 里跑着**重构前**的雁阵（systemd 指向 `server/index.js`），所以它刻意**不跟随 `main`**：
+
+| 分支 | 指向 | 用途 |
+| --- | --- | --- |
+| `prod-legacy` | 初始提交 `9cb672a` | 当前运行布局，`server/` `web/` `worker/` 原样保留 |
+| `main` | 跟随 `origin/main` | 开发主线，含新的 `services/` 结构 |
+
+部署新版本时**不要在这个目录里 checkout**，否则 `server/` 会被移走、systemd 失效。正确做法是把 `main` checkout 到新目录（例如 `/root/skein`），改好 unit 的 `WorkingDirectory` 与 `ExecStart`，再重启服务。
+
+推送：服务器用仓库级部署密钥（`/root/.ssh/skein_deploy`），已写入仓库的 `core.sshCommand`，`git push` 直接可用。
