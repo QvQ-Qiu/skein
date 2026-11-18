@@ -11,7 +11,7 @@ class Config:
     db_path: str = "data/skein.db"
     blob_root: str = "data/blobs"
     token: str = ""
-    port: int = 7700
+    port: int = 7800
     direct_model: str = "direct"
     route_model: str = "route"
     forum_base: str = "http://127.0.0.1:8080"

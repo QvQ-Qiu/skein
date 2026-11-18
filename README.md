@@ -32,11 +32,15 @@ deploy/
 legacy/
   dispatcher/   [迁移中] 重构前的 Node 调度台
 docs/
+  README.md                  文档索引
   architecture.md            五模块与三份权威
+  plan.md                    目标、进度与剩余工作
   control-plane.md           控制面现状、接口与环境变量
+  deployment.md              部署、切换与回滚
+  migration.md               十步迁移与服务器工作树
+  sandbox.md                 沙箱方案与止损
   market-cloud.md            集市云执行环境契约
   market-cloud-leverage.md   集市云能怎么发挥
-  migration.md               十步迁移与切换日
   adr/                       架构决策记录
 ```
 
