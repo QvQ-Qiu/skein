@@ -8,6 +8,26 @@ import time
 import uuid
 
 from skein import db
+from skein.admission import Event
+
+
+def thread_identity(event: Event) -> tuple[str, str]:
+    """帖子与它的评论属于同一条 Thread。"""
+    if event.source == "forum_comment":
+        return "forum_post", event.parent_id or event.origin_id
+    return event.source, event.origin_id
+
+
+def kv_get(conn: sqlite3.Connection, key: str, default: str | None = None) -> str | None:
+    row = conn.execute("SELECT value FROM kv WHERE key = ?", (key,)).fetchone()
+    return row["value"] if row else default
+
+
+def kv_set(conn: sqlite3.Connection, key: str, value: str) -> None:
+    conn.execute(
+        "INSERT INTO kv (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+        (key, value),
+    )
 
 
 def ensure_thread(conn: sqlite3.Connection, origin: str, origin_id: str) -> str:

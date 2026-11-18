@@ -18,6 +18,12 @@ class Config:
     forum_token: str = ""
     llm_base: str = ""
     llm_key: str = ""
+    forum_db_host: str = "127.0.0.1"
+    forum_db_port: int = 3506
+    forum_db_user: str = ""
+    forum_db_password: str = ""
+    forum_db_name: str = "ssemarket"
+    poll_interval: int = 60
 
     @classmethod
     def from_env(cls, env: dict[str, str] | None = None) -> "Config":
@@ -34,4 +40,10 @@ class Config:
             forum_token=source.get("SKEIN_FORUM_TOKEN", base.forum_token),
             llm_base=source.get("SKEIN_LLM_BASE", base.llm_base),
             llm_key=source.get("SKEIN_LLM_KEY", base.llm_key),
+            forum_db_host=source.get("SKEIN_FORUM_DB_HOST", base.forum_db_host),
+            forum_db_port=int(source.get("SKEIN_FORUM_DB_PORT", base.forum_db_port)),
+            forum_db_user=source.get("SKEIN_FORUM_DB_USER", base.forum_db_user),
+            forum_db_password=source.get("SKEIN_FORUM_DB_PASSWORD", base.forum_db_password),
+            forum_db_name=source.get("SKEIN_FORUM_DB_NAME", base.forum_db_name),
+            poll_interval=int(source.get("SKEIN_POLL_INTERVAL", base.poll_interval)),
         )

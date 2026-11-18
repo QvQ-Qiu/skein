@@ -55,7 +55,8 @@ class RouterHost:
             return HostResult("duplicate")
 
         decision = decide(event, self._policy)
-        thread_id = store.ensure_thread(self._conn, event.source, self._origin_thread(event))
+        thread_origin, thread_key = store.thread_identity(event)
+        thread_id = store.ensure_thread(self._conn, thread_origin, thread_key)
         store.record_event(
             self._conn,
             event.source,
@@ -102,7 +103,3 @@ class RouterHost:
             if isinstance(content, str) and content.strip():
                 return content.strip()[:60]
         return "聊天分派"
-
-    @staticmethod
-    def _origin_thread(event: Event) -> str:
-        return event.parent_id or event.origin_id

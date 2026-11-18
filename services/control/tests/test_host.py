@@ -111,7 +111,7 @@ def test_comment_thread_uses_parent_post(conn):
     )
     host(conn, FakeLLM(route={"action": "route"})).on_event(event)
     row = conn.execute("SELECT origin, origin_id FROM threads").fetchone()
-    assert tuple(row) == ("forum_comment", "p7")
+    assert tuple(row) == ("forum_post", "p7")
 
 
 def test_dedup_key_attaches_instead_of_second_ticket(conn):
