@@ -1,0 +1,91 @@
+"""领域库读写。所有写操作都走这里，宿主不直接拼 SQL。"""
+
+from __future__ import annotations
+
+import json
+import sqlite3
+import time
+import uuid
+
+from skein import db
+
+
+def ensure_thread(conn: sqlite3.Connection, origin: str, origin_id: str) -> str:
+    row = conn.execute(
+        "SELECT id FROM threads WHERE origin = ? AND origin_id = ?", (origin, origin_id)
+    ).fetchone()
+    if row:
+        return row["id"]
+    thread_id = db.new_id()
+    conn.execute(
+        "INSERT INTO threads (id, origin, origin_id, created_at) VALUES (?, ?, ?, ?)",
+        (thread_id, origin, origin_id, time.time()),
+    )
+    return thread_id
+
+
+def record_event(
+    conn: sqlite3.Connection,
+    origin: str,
+    origin_id: str,
+    thread_id: str | None,
+    payload: dict,
+    verdict: str,
+) -> str:
+    event_id = db.new_id()
+    conn.execute(
+        "INSERT OR IGNORE INTO events"
+        " (id, origin, origin_id, thread_id, payload, verdict, created_at)"
+        " VALUES (?, ?, ?, ?, ?, ?, ?)",
+        (event_id, origin, origin_id, thread_id, json.dumps(payload, ensure_ascii=False), verdict, time.time()),
+    )
+    return event_id
+
+
+def event_seen(conn: sqlite3.Connection, origin: str, origin_id: str) -> bool:
+    row = conn.execute(
+        "SELECT 1 FROM events WHERE origin = ? AND origin_id = ?", (origin, origin_id)
+    ).fetchone()
+    return row is not None
+
+
+def create_ticket(
+    conn: sqlite3.Connection,
+    title: str,
+    thread_id: str | None = None,
+    dedup_key: str | None = None,
+) -> str:
+    ticket_id = db.new_id()
+    code = "SK-" + ticket_id[:8].upper()
+    t = time.time()
+    conn.execute(
+        "INSERT INTO tickets (id, code, thread_id, title, status, dedup_key, created_at, updated_at)"
+        " VALUES (?, ?, ?, ?, 'staged', ?, ?, ?)",
+        (ticket_id, code, thread_id, title, dedup_key, t, t),
+    )
+    return ticket_id
+
+
+def find_ticket_by_dedup(conn: sqlite3.Connection, dedup_key: str) -> str | None:
+    row = conn.execute("SELECT id FROM tickets WHERE dedup_key = ?", (dedup_key,)).fetchone()
+    return row["id"] if row else None
+
+
+def assign(conn: sqlite3.Connection, ticket_id: str, worker_id: str) -> None:
+    conn.execute(
+        "INSERT OR IGNORE INTO assignments (ticket_id, worker_id, state, updated_at)"
+        " VALUES (?, ?, 'assigned', ?)",
+        (ticket_id, worker_id, time.time()),
+    )
+    conn.execute(
+        "UPDATE tickets SET status = 'assigned', updated_at = ? WHERE id = ? AND status = 'staged'",
+        (time.time(), ticket_id),
+    )
+
+
+def subscribe(conn: sqlite3.Connection, thread_id: str, ticket_id: str) -> None:
+    conn.execute(
+        "INSERT OR IGNORE INTO subscriptions (thread_id, ticket_id, state, created_at)"
+        " VALUES (?, ?, 'active', ?)",
+        (thread_id, ticket_id, time.time()),
+    )
