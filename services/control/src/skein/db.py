@@ -12,7 +12,7 @@ import time
 import uuid
 from pathlib import Path
 
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 6
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS events (
@@ -151,6 +151,31 @@ CREATE TABLE IF NOT EXISTS shadow_decisions (
 );
 
 CREATE INDEX IF NOT EXISTS idx_shadow_origin ON shadow_decisions (source, origin_id);
+
+CREATE TABLE IF NOT EXISTS nodes (
+    id          TEXT PRIMARY KEY,
+    name        TEXT NOT NULL DEFAULT '',
+    host        TEXT NOT NULL DEFAULT '',
+    platforms   TEXT NOT NULL DEFAULT '[]',
+    peer_url    TEXT NOT NULL DEFAULT '',
+    status      TEXT NOT NULL DEFAULT 'online',
+    max_workers INTEGER NOT NULL DEFAULT 3,
+    last_seen   REAL NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS dispatches (
+    id          TEXT PRIMARY KEY,
+    ticket_id   TEXT NOT NULL,
+    node_id     TEXT NOT NULL,
+    worker_id   TEXT,
+    state       TEXT NOT NULL DEFAULT 'pending',
+    attempt     INTEGER NOT NULL DEFAULT 1,
+    detail      TEXT,
+    updated_at  REAL NOT NULL,
+    FOREIGN KEY (ticket_id) REFERENCES tickets (id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_dispatches_node ON dispatches (node_id, state);
 
 CREATE INDEX IF NOT EXISTS idx_events_thread ON events (thread_id);
 CREATE INDEX IF NOT EXISTS idx_tickets_status ON tickets (status);
