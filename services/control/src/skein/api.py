@@ -5,10 +5,13 @@ from __future__ import annotations
 import base64
 import binascii
 import sqlite3
+import time
 
-from fastapi import Depends, FastAPI, Header, HTTPException
+from fastapi import Depends, FastAPI, Header, HTTPException, WebSocket
 from pydantic import BaseModel, Field
 
+from skein import db
+from skein.channel import ChannelHub
 from skein.host import RouterHost
 from skein.outbox import EmitResult, Outbox
 from skein.session_store import SessionStore, TurnConflict
@@ -34,6 +37,10 @@ class EmitIn(BaseModel):
     payload: dict = Field(default_factory=dict)
 
 
+class ReviewIn(BaseModel):
+    decision: str
+
+
 def create_app(
     conn: sqlite3.Connection,
     blob_root: str,
@@ -42,11 +49,13 @@ def create_app(
     llm=None,
     direct_model: str = "direct",
     route_model: str = "route",
+    platform_repos: dict[str, str] | None = None,
 ) -> FastAPI:
     app = FastAPI(title="skein-control", version="0.1.0")
     sessions = SessionStore(conn, blob_root)
     outbox = Outbox(conn, writer)
     host = RouterHost(conn, llm, direct_model, route_model) if llm is not None else None
+    hub = ChannelHub(conn, token, platform_repos or {})
 
     def auth(x_skein_token: str = Header(default="")) -> None:
         if not token or x_skein_token != token:
@@ -59,6 +68,28 @@ def create_app(
     @app.get("/internal/summary", dependencies=[Depends(auth)])
     def internal_summary() -> dict:
         return build_summary(conn)
+
+    @app.websocket("/api/agent/channel")
+    async def agent_channel(ws: WebSocket) -> None:
+        await hub.serve(ws)
+
+    @app.post("/internal/tickets/{ticket_id}/dispatch", dependencies=[Depends(auth)])
+    async def dispatch_ticket(ticket_id: str, platform: str | None = None) -> dict:
+        return await hub.dispatch_ticket(ticket_id, platform)
+
+    @app.post("/internal/tickets/{ticket_id}/review", dependencies=[Depends(auth)])
+    def review_ticket(ticket_id: str, body: ReviewIn) -> dict:
+        if body.decision not in ("approve", "reject"):
+            raise HTTPException(status_code=400, detail="decision must be approve or reject")
+        status = "done" if body.decision == "approve" else "rejected"
+        conn.execute(
+            "UPDATE tickets SET status = ?, updated_at = ? WHERE id = ?",
+            (status, time.time(), ticket_id),
+        )
+        db.record_audit(
+            conn, "human", "review", {"ticket_id": ticket_id, "decision": body.decision}
+        )
+        return {"ticket_id": ticket_id, "status": status}
 
     if host is not None:
 

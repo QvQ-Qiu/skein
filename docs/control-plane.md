@@ -16,17 +16,18 @@
 | HTTP 接口 | `skein/api.py` | 健康、聊天、transcript、写回、概览 |
 | 采集 | `skein/ingest.py`、`skein/forum_source.py` | 公开视图 → Trigger；水位；Thread 归并 |
 | 影子派单 | `skein/shadow.py` | 真模型判断，只记录，零副作用 |
+| 节点通道 | `skein/channel.py` | WebSocket：注册、心跳、建 worker、派单、回报 |
+| 调度 | `skein/scheduler.py` | 在线窗口、容量、平台匹配 |
 | 通道 | `skein/channels.py` | 论坛内部口写入，禁用系统代理 |
 | 模型客户端 | `skein/llm_http.py` | OpenAI 兼容网关，强制 JSON |
 
 ## 二、还没实现的
 
-- **真派单**：现在 `verdict=process` 只进影子，不建单。等影子对比确认后再开。
+- **Outbox 接管日报与精华帖**：通道与幂等已就绪，作业侧还没切过来。
 - **Watchdog**：信号采集、金丝雀、提示词写入都没做。
-- **节点侧 transcript 同步**：控制面已能收，`services/node-agent` 还没发。
 - **集市云执行环境**：YatTerra 客户端未写，token 未拿到。
-- **面板**：`services/console` 还是旧代码。
-- **调度**：`runs` 表有结构，没有驱动。
+- **面板**：`services/console` 还是旧代码，未接新接口。
+- **定时作业驱动**：`runs` 表有结构，没有驱动。
 
 ## 三、怎么跑
 
@@ -62,6 +63,11 @@ make run-poll    # 采集循环
 | POST | `/internal/worker/turn` | 有 | transcript 上传（base64） |
 | POST | `/internal/outbox/emit` | 有 | 对外写，单次 |
 | GET | `/internal/summary` | 有 | 计数概览 |
+| POST | `/internal/tickets/{id}/dispatch` | 有 | 派给在线节点 |
+| POST | `/internal/tickets/{id}/review` | 有 | approve / reject |
+| WS | `/api/agent/channel` | 协议内 token | 节点反向拨入 |
+
+节点协议（与旧雁阵兼容）：`node.register` / `node.heartbeat` / `worker.created` / `ack` / `result`；服务端下发 `worker.create` / `dispatch`。
 
 鉴权头：`X-Skein-Token`。
 
