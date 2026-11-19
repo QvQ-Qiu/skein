@@ -98,6 +98,19 @@ systemctl enable --now skein-control
 curl -s http://127.0.0.1:7800/health/live
 ```
 
+### 控制台
+
+`/console/` 由控制面直接托管构建产物，不需要单独的服务：
+
+```bash
+cd /root/skein/services/console
+npm ci
+npm run build          # 产物在 dist/，已被 .gitignore 忽略
+systemctl restart skein-control
+```
+
+没有 `dist/` 时控制面退回 `services/console/legacy/` 静态页；旧页始终保留在 `/console-legacy/`。
+
 ## 五、数据迁移
 
 旧库只读，新库可重复迁移：
@@ -108,7 +121,7 @@ python3 /root/skein/deploy/scripts/migrate_yanzhen.py \
   --new /srv/skein/skein.db
 ```
 
-先 `--dry-run` 看计数。2026-11-19 实测：318 事件、9 工单、14 派工、1 节点。
+先 `--dry-run` 看计数。2026-11-19 实测：321 事件、9 工单、14 条 assignment、14 条 dispatch、3 会话、1 节点。
 
 ## 六、切换步骤
 
