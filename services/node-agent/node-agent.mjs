@@ -17,6 +17,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { TranscriptSync } from './transcript-sync.mjs';
 import { buildSandboxArgs, sandboxSupported, unitName } from './sandbox.mjs';
+import { workerEnvironment } from './worker-env.mjs';
 
 const env = process.env;
 const CONTROLLER_URL = env.CONTROLLER_URL || 'ws://127.0.0.1:3030/api/agent/channel';
@@ -121,7 +122,12 @@ function runClaude(repo, prompt, { resume = null, onProgress = () => {}, timeout
       });
       file = 'systemd-run';
     }
-    const child = spawn(file, execArgs, { cwd: repo, env: { ...ccEnv, HOME: home }, stdio: ['ignore', 'pipe', 'pipe'] });
+    const child = spawn(file, execArgs, {
+      cwd: repo,
+      // 控制面令牌只属于 node-agent，不进 worker。
+      env: { ...workerEnvironment(ccEnv), HOME: home },
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
     let buf = '', lastEmit = 0, finalText = '', sessionId = resume, errored = null, done = false;
     const timer = setTimeout(() => { child.kill('SIGTERM'); errored = 'cc 超时被终止'; }, timeoutMs);
     const finish = (ok) => { if (done) return; done = true; clearTimeout(timer); resolve({ ok, summary: (finalText || errored || '').slice(0, 4000), sessionId }); };
