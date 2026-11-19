@@ -1,6 +1,7 @@
 # 沙箱：让 worker 不能把整机拖垮
 
 > 2026-11-18 · 基于宿主机实测（systemd 249.11 / cgroup v2 unified / Ubuntu 22.04）
+> 分层与选型见 [worker-runtime.md](worker-runtime.md)：本文是 **L1 进程沙箱**；默认 worker 走 L2 gVisor。
 
 ## 一、结论
 
