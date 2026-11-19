@@ -53,6 +53,8 @@ class QAProxy:
         self._client = client or httpx.AsyncClient(
             timeout=httpx.Timeout(connect=5.0, read=None, write=30.0, pool=5.0),
             follow_redirects=False,
+            # 上游都是本机回环：必须禁系统代理（HTTP(S)_PROXY 会把 127.0.0.1 也带走）。
+            trust_env=False,
         )
 
     @property
