@@ -66,11 +66,23 @@
   公共路径实测：无 JWT 401、真 JWT 200、SSE `event: ping/content` 正常，未被缓冲。
 - 回滚：恢复 `nginx.conf.bak-qa-cutover-*` 并 reload。
 
+**chat 面已迁出 k8s（2026-11-19）**
+
+- 镜像从 k3s containerd 导出并导入 docker（`xiaoqiu:1.0.91`，437MB），容器名 `xiaoqiu-chat`。
+- 运行方式：`--network host`、`-e XIAOQIU_PORT=8119`、`--env-file /etc/skein/xiaoqiu-chat.env`（600，
+  27 项，从原 Deployment 解出，含 secretKeyRef 解码）、`--restart unless-stopped`、
+  `--log-opt max-size=50m --log-opt max-file=3`（宿主有两次满盘史，日志必须限容）。
+- 控制面 `SKEIN_QA_CHAT_UPSTREAM=http://127.0.0.1:8119`；`ag-xiaoqiu-chat-v-2611011650` 已
+  `scale --replicas=0`（对象保留，可回滚）。
+- 验证：容器直连 JWT 200；公共链路（ssemarket.cn → Skein → 8119）真 JWT 200；缩容后仍 200。
+
+**chat 回滚**：`kubectl scale deploy ag-xiaoqiu-chat-v-2611011650 -n qiudock --replicas=1`，
+把 `SKEIN_QA_CHAT_UPSTREAM` 改回 `http://127.0.0.1:8110`，重启 `skein-control`。
+
 **未完成**
 
-- 进程仍在 qiudock 命名空间（k8s Deployment），尚未迁到 A 上的 docker/systemd 独立载体；
-  chat 面已不依赖 qdockd（代码沙箱默认关），ops 面仍依赖 `QDOCK_*`（MCP/沙箱/指标）。
-- ops 工具面（k8s/ssh/sandbox）要映射到 Skein 的节点、日志、worker；替换完成前不关 qdockd。
+- ops 面仍在 qiudock 命名空间（k8s Deployment），依赖 `QDOCK_*`（MCP/沙箱/指标）；
+  工具面要映射到 Skein 的节点、日志、worker，或被明确裁掉，替换完成前不关 qdockd。
 - 面板（ops-console）仍走自己的路径；下线前需要把「服务状态 + 服务日志」补到 Skein 控制台。
 
 ### P5 面板与平台
