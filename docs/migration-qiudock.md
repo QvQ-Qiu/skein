@@ -54,10 +54,24 @@
 
 - worker 已在集市云 pod 跑；`sbx`/`image-pins` 无消费者后 scale 0。
 
-### P4 小秋
+### P4 小秋（进行中）
 
-- chat：确认 LLM 依赖后，可先以独立容器留在 A（docker + systemd），不依赖 qiudock。
-- ops：工具面（k8s/ssh/sandbox）映射到 Skein 的节点、日志、worker；替换完成前不关 qdockd。
+**已完成（2026-11-19）：统一入口与权限隔离**
+
+- 控制面新增代理层：`/api/v1/agent/*`、`/task/*` → chat 上游（`http://127.0.0.1:8110`），
+  `/ops/*` → ops 上游（`http://127.0.0.1:8100`），`SKEIN_QA_CHAT_UPSTREAM` / `SKEIN_QA_OPS_UPSTREAM` 配置。
+- 权限边界：chat 只透传用户 JWT，**不转发 Cookie**（SSO 会话不外泄）；ops 只放服务令牌或
+  SSO `internal=1`，其它一律 401/403。
+- nginx 的 `/api/v1/agent/` 两处 location 已从 `xiaoqiu_chat` 切到 `host.docker.internal:7800`；
+  公共路径实测：无 JWT 401、真 JWT 200、SSE `event: ping/content` 正常，未被缓冲。
+- 回滚：恢复 `nginx.conf.bak-qa-cutover-*` 并 reload。
+
+**未完成**
+
+- 进程仍在 qiudock 命名空间（k8s Deployment），尚未迁到 A 上的 docker/systemd 独立载体；
+  chat 面已不依赖 qdockd（代码沙箱默认关），ops 面仍依赖 `QDOCK_*`（MCP/沙箱/指标）。
+- ops 工具面（k8s/ssh/sandbox）要映射到 Skein 的节点、日志、worker；替换完成前不关 qdockd。
+- 面板（ops-console）仍走自己的路径；下线前需要把「服务状态 + 服务日志」补到 Skein 控制台。
 
 ### P5 面板与平台
 
@@ -71,6 +85,10 @@
 | suspend CronJob | `kubectl patch cronjob <name> -p '{"spec":{"suspend":false}}'` |
 | qdockd scale 0 | `kubectl scale deploy qiudock-platform --replicas=1` |
 | 作业改走 Skein | `SKEIN_DRIVER=0` 并恢复 qiudock CronJob |
+| 小秋 chat 走 Skein 门面 | 恢复 `/root/SSE_Market/nginx_proxy/nginx.conf.bak-qa-cutover-*` 并 `nginx -s reload`；论坛 chat 立即回到直连 xiaoqiu |
+
+**新的运行依赖**：切流后论坛 chat 依赖 `skein-control` 存活（nginx → 7800 → 8110）。
+控制面故障时 chat 会 502；回滚上面一行即可恢复直连。
 
 ## 5. 现状依赖
 
