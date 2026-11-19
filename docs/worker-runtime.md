@@ -93,19 +93,22 @@
 
 **WZ8 上**：k3s（:6443）+ 集市云平台管理的几十个 pod；UniSSO `unisso_v2` 监听 127.0.0.1:32004，经 frp 变成 `sso.ssemarket.cn`。
 
-**新体系落地位置**：
+**新体系落地位置（2026-11-19 已上线）**：
 
 | 组件 | 机器 | 形式 | 地址/路径 |
 | --- | --- | --- | --- |
-| `skein-control` | A | systemd `skein-control.service` | 127.0.0.1:7800 |
+| `skein-control` | A | systemd `skein-control.service` | 172.17.0.1:7800（docker 网桥） |
+| 公网入口 | A | 现有 nginx_proxy 容器加 vhost | `https://skein.ssemarket.cn`（证书已签） |
 | 控制台 | A | 由 control 直接托管 `dist` | `https://skein.ssemarket.cn/console/` |
-| 新 node-agent | A | systemd | peer **:9102**（9101 已被旧节点占用） |
-| worker（cc） | A | systemd-run 瞬态 service，用户 `agent` | `/srv/agent/jobs/<工单>` |
+| node-agent | **集市云 pod `skein`** | 无 systemd，`setsid nohup` 常驻 | `wss://skein.ssemarket.cn/api/agent/channel`，peer :9101 |
+| worker（cc） | **同一 pod** | 以 `cloud` 用户直接跑，每单独立 HOME | `~/repos/wt-<workerId>` |
 | 正式库 | A | SQLite WAL | `/srv/skein/skein.db` + `/srv/skein/blobs` |
 | 论坛写回 | A | Outbox → 本地主站 | 127.0.0.1:8080 |
 | SSO | A → WZ8 | 控制面服务端调用 | `https://sso.ssemarket.cn` |
 
-**引导期先放 A，稳态不放 A。** A 是公网入口（nginx）、主站、k8s 和旧雁阵所在的生产机；写代码的 agent 即使有 cgroup/nft，也仍是与线上服务共享内核的进程。正确形态是**控制面/状态留在 A，执行节点独立**（一台单独机器或集市云 pod），node-agent 反向拨入，不需要入站端口。拿到独立节点之前，A 上最多跑 gVisor 容器、容量限制在 1–2 个 worker，且只对测试仓开着推权限。
+**控制面在 A，执行节点在 pod，两者分离。** A 是公网入口、主站、k8s 与旧雁阵所在的生产机，不再承载写代码的 worker；pod（8C/16G）是独立执行节点，通过 wss 反向拨入，不需要入站端口。
+
+pod 内没有 systemd，也没有 mount namespace 权限（`unshare -m` EPERM），`systemd-run` 与 `bubblewrap` 都起不来，**pod 本身就是隔离边界**。引导脚本与操作步骤见 [`deploy/pod/README.md`](../deploy/pod/README.md)。
 
 ## 2. 当前方案
 
@@ -235,23 +238,33 @@
                      ┌──────────── 控制面（A / skein-control :7800）───────┐
                      │ 准入 · 工单 · 派工 · 会话权威 · Outbox · 审计       │
                      └───────────────▲───────────────────┬───────────────┘
-                                     │ WS :9102 结果/心跳 │ dispatch
+                                     │ wss 结果/心跳      │ dispatch
                      ┌───────────────┴───────────────────▼───────────────┐
-                     │ 节点（node-agent，A 上 systemd 服务）               │
-                     │  worktree=/srv/agent/jobs/<ticket>                 │
+                     │ 执行节点（集市云 pod `skein`，8C/16G）              │
+                     │  node-agent（setsid 常驻）                         │
+                     │  worktree=~/repos/wt-<workerId>                    │
                      │  ┌───────────────────────────────────────────┐    │
-                     │  │ systemd-run 瞬态 service（user=agent）      │    │
-                     │  │   cgroup：MemoryMax / CPUQuota / TasksMax  │    │
-                     │  │   ProtectSystem=strict + ReadWritePaths    │    │
-                     │  │   nft 端口白名单（GitHub/LLM/控制面/8080）  │    │
+                     │  │ cc 直接跑（user=cloud，每单独立 HOME）      │    │
+                     │  │   pod cgroup：8C / 16G                     │    │
+                     │  │   出网到 GitHub / LLM 网关 / 控制面         │    │
                      │  │   harness: claude 或 pi                     │    │
                      │  └───────────────────────────────────────────┘    │
                      └───────────────────────────────────────────────────┘
 ```
 
-- 瞬态 service 的寿命 = 一次派单；结果与 transcript 先回传，再回收。
-- 回收 systemd 瞬态 unit 不是「删 pod」；但任何长驻服务的停止/重启仍需显式审批。
-- 没有「大 pod」这个中间层：节点就是 A 上的 node-agent；扩容 = 在另一台机器再起一个 node-agent。
+- 隔离边界 = pod 本身：pod 内 `unshare -m` / `bwrap` 均 EPERM，内层不再套沙箱。
+- 一次派单 = 一个 worktree + 一个 cc 会话；结果与 transcript 先回传，再回收。
+- 扩容 = 在任何一台机器/pod 再起一个 node-agent，控制面协议不变。
+
+### 4.2.1 已打通的一次真实链路（SK-TP1，2026-11-19）
+
+```
+工单 SK-TP1 → 控制面派给 n-cloud-skein → pod 建 worktree
+  → cc 写 TEST_WORKER.md → commit edb904a（fix/yz-sk-tp1）
+  → result 回传（分支/base/diffstat/自测总结）→ 工单 review
+```
+
+从派发到 `review` 约 25 秒；`pushed=false`（不推远端，等人验收）。
 
 ### 4.3 凭据与出网（按 Beltdown 的规矩）
 
@@ -283,7 +296,7 @@ unisso 目前只有二进制在跑 → **前置任务**：拿到源码/仓库，
 
 | 阶段 | 内容 | 验收 |
 | --- | --- | --- |
-| P0（本周） | A 上准备 L1：建 `agent` 用户、`/srv/agent/jobs`、nft 白名单；新 node-agent 用 `PEER_PORT=9102` + `SANDBOX_ENABLED=1` 接入 | 派一张测试单：worker 以 `agent` 运行、超内存被 cgroup 杀、出网只通白名单、结果与 transcript 回来 |
+| P0（已完成 2026-11-19） | 控制面在 A（7800 + `skein.ssemarket.cn` 证书入口）；执行节点 = 集市云 pod `skein`（8C/16G）；node-agent 接入 | 测试单 SK-TP1 从派发到 review 约 25 秒，分支/提交/diffstat 齐全 |
 | P1（主线） | **自维护闭环**：Watchdog 信号自动建单（开关默认关）、平台自身巡检工单、每日回顾工单 | 平台缺陷由工雁提交修复分支，人只点验收 |
 | P2 | `WORKER_BIN=pi` 适配；worker 生命周期与残留清理；节点容量守卫 | pi 跑通一张测试单；中断后无残留进程与 worktree |
 | P3 | unisso 三件套（源码 → 构建 → 部署）；按需加第二个 node-agent | unisso 可被工单修改并通过部署脚本上线 |

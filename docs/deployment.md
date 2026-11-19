@@ -132,7 +132,14 @@ SKEIN_COOKIE_DOMAIN=
 - unisso 503/超时不清本地会话；登录接口每 IP 每分钟 10 次。
 - 验收用 E2E 账号 `music-e2e-test@ssemarket.cn`（见 `deploy-check-sso.sh` 样板）。
 
-对外入口：`skein.ssemarket.cn` → `127.0.0.1:7800`（nginx 加 server 块，先 `nginx -t` 再 reload；证书 `certbot certonly -d skein.ssemarket.cn`）。
+对外入口（2026-11-19 已上线）：
+
+- nginx 是现有 `sse_market_server-nginx_proxy-1` 容器，主进程用 `-c /etc/nginx/custom.conf` 启动；
+  校验/重载必须带 `-c`：`nginx -t -c /etc/nginx/custom.conf`。默认的 `/etc/nginx/nginx.conf` 是镜像自带文件，改了不生效。
+- server 块放在 `custom.conf` 的 `http {}` **内部**（模板见 `deploy/nginx/skein.conf`）。
+- 控制面绑 docker 网桥，容器的 nginx 才够得到：`/etc/skein/env` 加 `SKEIN_HOST=172.17.0.1`（默认 `127.0.0.1`）。
+- 证书：`docker run --rm -v /root/SSE_Market/certbot/www:/var/www/certbot -v /root/SSE_Market/Nginx:/etc/letsencrypt certbot/certbot certonly --webroot -w /var/www/certbot -d skein.ssemarket.cn`。
+- 执行节点见 [`deploy/pod/README.md`](../deploy/pod/README.md)：集市云 pod `skein`，node-agent 通过 `wss://skein.ssemarket.cn/api/agent/channel` 反向拨入。
 
 ## 五、数据迁移
 
