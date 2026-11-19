@@ -595,6 +595,44 @@ input {
   overflow-wrap: anywhere;
 }
 
+.whoami {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.whoami__name {
+  max-width: 120px;
+  overflow: hidden;
+  color: var(--text);
+  font-size: 12px;
+  letter-spacing: 0.06em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.whoami__out {
+  padding: 2px 8px 3px;
+  background: transparent;
+  border: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  cursor: pointer;
+}
+
+.whoami__out:hover,
+.whoami__out:focus-visible {
+  border-color: var(--bad);
+  color: var(--bad);
+}
+
+.landing__stack {
+  margin-top: 10px;
+}
+
 .topbar__refresh {
   position: relative;
   flex: 0 0 auto;

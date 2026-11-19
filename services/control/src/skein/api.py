@@ -2,16 +2,19 @@
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import binascii
 import hashlib
 import json
 import sqlite3
 import time
+from collections import defaultdict, deque
 from pathlib import Path
+from typing import Any
 
-from fastapi import Depends, FastAPI, Header, HTTPException, WebSocket
-from fastapi.responses import RedirectResponse
+from fastapi import Depends, FastAPI, Header, HTTPException, Request, WebSocket
+from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
@@ -22,6 +25,19 @@ from skein.compat import ForumCompatWriter
 from skein.host import RouterHost
 from skein.outbox import EffectState, EmitResult, Outbox, get
 from skein.session_store import SessionStore, TurnConflict
+from skein.sso import (
+    COOKIE_NAMES,
+    CURRENT_PRINCIPAL,
+    Principal,
+    SsoAuth,
+    SsoClient,
+    SsoConfig,
+    SsoRejected,
+    SsoUnavailable,
+    cookie_delete_domain,
+    cookie_domain_for,
+    principal_from,
+)
 from skein.summary import summary as build_summary
 from skein.ui_api import create_ui_router, ticket_rows
 
@@ -82,6 +98,11 @@ class FollowupIn(BaseModel):
     text: str = ""
 
 
+class LoginIn(BaseModel):
+    email: str
+    password: str
+
+
 class TriggerIn(BaseModel):
     source: str
     origin_id: str
@@ -102,6 +123,8 @@ def create_app(
     platform_repos: dict[str, str] | None = None,
     forum_base: str = "",
     internal_token: str = "",
+    sso_config: SsoConfig | None = None,
+    sso_client: Any | None = None,
 ) -> FastAPI:
     app = FastAPI(title="skein-control", version="0.1.0")
     sessions = SessionStore(conn, blob_root)
@@ -109,16 +132,115 @@ def create_app(
     compat = Outbox(conn, ForumCompatWriter(forum_base)) if forum_base else None
     host = RouterHost(conn, llm, direct_model, route_model) if llm is not None else None
     hub = ChannelHub(conn, token, platform_repos or {})
+    sso_auth: SsoAuth | None = None
+    if sso_config is not None and sso_config.enabled:
+        if sso_client is None:
+            sso_client = SsoClient(sso_config)
+        sso_auth = SsoAuth(sso_client, sso_config)
+    login_attempts: dict[str, deque[float]] = defaultdict(deque)
 
-    def auth(x_skein_token: str = Header(default="")) -> None:
-        if not token or x_skein_token != token:
-            raise HTTPException(status_code=401, detail="unauthorized")
+    async def auth(
+        request: Request, x_skein_token: str = Header(default="")
+    ) -> Principal | None:
+        # 机器走共享令牌，人走 UniSSO 会话；两者都失败才拒。
+        if token and x_skein_token == token:
+            return None
+        if sso_auth is not None:
+            try:
+                principal = await asyncio.to_thread(sso_auth.verify, request.cookies)
+            except SsoRejected as error:
+                raise HTTPException(status_code=error.status, detail=error.code)
+            except SsoUnavailable:
+                raise HTTPException(status_code=503, detail="sso_unavailable")
+            CURRENT_PRINCIPAL.set(principal)
+            return principal
+        raise HTTPException(status_code=401, detail="unauthorized")
+
+    def _login_allowed(ip: str) -> bool:
+        now = time.time()
+        window = login_attempts[ip]
+        while window and now - window[0] > 60:
+            window.popleft()
+        if len(window) >= 10:
+            return False
+        window.append(now)
+        return True
 
     app.include_router(create_ui_router(conn, blob_root, auth))
 
     @app.get("/health/live")
     def live() -> dict:
         return {"status": "ok"}
+
+    @app.get("/api/session")
+    async def session_probe(request: Request) -> dict:
+        # 控制台启动时打这个：决定出登录页还是直接进。sso 没配就声明 token 模式。
+        if sso_auth is None or sso_config is None:
+            return {"mode": "token"}
+        try:
+            principal = await asyncio.to_thread(sso_auth.verify, request.cookies)
+        except SsoRejected as error:
+            raise HTTPException(status_code=error.status, detail=error.code)
+        except SsoUnavailable:
+            raise HTTPException(status_code=503, detail="sso_unavailable")
+        CURRENT_PRINCIPAL.set(principal)
+        return {"mode": "sso", "user": principal.as_dict()}
+
+    @app.post("/api/session/login")
+    async def session_login(request: Request, body: LoginIn) -> JSONResponse:
+        if sso_auth is None or sso_config is None or sso_client is None:
+            raise HTTPException(status_code=404, detail="sso_not_configured")
+        client_ip = request.client.host if request.client else "?"
+        if not _login_allowed(client_ip):
+            raise HTTPException(status_code=429, detail="too_many_attempts")
+        try:
+            payload = await asyncio.to_thread(
+                sso_client.password_verify, body.email.strip(), body.password
+            )
+        except SsoRejected as error:
+            raise HTTPException(status_code=error.status, detail=error.code)
+        except SsoUnavailable:
+            raise HTTPException(status_code=503, detail="sso_unavailable")
+        principal = principal_from(payload)
+        if principal is None:
+            raise HTTPException(status_code=502, detail="sso_bad_response")
+        if sso_config.require_internal and not principal.internal:
+            raise HTTPException(status_code=403, detail="not_internal")
+        response = JSONResponse({"mode": "sso", "user": principal.as_dict()})
+        session = str(payload.get("sso_session") or "")
+        if session:
+            response.set_cookie(
+                key=str(payload.get("sso_cookie_name") or "unisso_sid"),
+                value=session,
+                domain=cookie_domain_for(
+                    sso_config, str(payload.get("sso_cookie_domain") or "") or None
+                ),
+                max_age=int(payload.get("sso_max_age") or 604800),
+                path="/",
+                httponly=True,
+                secure=True,
+                samesite="lax",
+            )
+        CURRENT_PRINCIPAL.set(principal)
+        return response
+
+    @app.post("/api/session/logout")
+    async def session_logout(request: Request) -> JSONResponse:
+        if sso_auth is not None and sso_client is not None and sso_config is not None:
+            session = SsoAuth.cookie_value(request.cookies)
+            if session:
+                try:
+                    await asyncio.to_thread(sso_client.session_revoke, session)
+                except (SsoUnavailable, SsoRejected):
+                    pass  # unisso 不可达也要把本地清干净
+                sso_auth.invalidate(session)
+        response = JSONResponse({"ok": True})
+        domain = (
+            cookie_delete_domain(sso_config) if sso_config is not None else ".ssemarket.cn"
+        )
+        for name in COOKIE_NAMES:
+            response.delete_cookie(key=name, domain=domain, path="/")
+        return response
 
     @app.get("/internal/summary", dependencies=[Depends(auth)])
     def internal_summary() -> dict:
@@ -236,8 +358,12 @@ def create_app(
             "UPDATE tickets SET status = ?, updated_at = ? WHERE id = ?",
             (status, time.time(), ticket_id),
         )
+        principal = CURRENT_PRINCIPAL.get()
         db.record_audit(
-            conn, "human", "review", {"ticket_id": ticket_id, "decision": body.decision}
+            conn,
+            principal.label if principal else "human",
+            "review",
+            {"ticket_id": ticket_id, "decision": body.decision},
         )
         return {"ticket_id": ticket_id, "status": status}
 

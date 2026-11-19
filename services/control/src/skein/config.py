@@ -39,6 +39,11 @@ class Config:
     watchdog: bool = False
     watchdog_auto: bool = False
     watchdog_interval: int = 300
+    sso_base: str = "https://sso.ssemarket.cn"
+    sso_client_id: str = ""
+    sso_client_secret: str = ""
+    # None=按 unisso 响应种；""=host-only；其他值=显式域
+    sso_cookie_domain: str | None = None
 
     @classmethod
     def from_env(cls, env: dict[str, str] | None = None) -> Config:
@@ -90,4 +95,21 @@ class Config:
             watchdog_interval=int(
                 source.get("SKEIN_WATCHDOG_INTERVAL", base.watchdog_interval)
             ),
+            sso_base=source.get("SKEIN_SSO_BASE", base.sso_base),
+            sso_client_id=source.get("SKEIN_SSO_CLIENT_ID", base.sso_client_id),
+            sso_client_secret=source.get(
+                "SKEIN_SSO_CLIENT_SECRET", base.sso_client_secret
+            ),
+            sso_cookie_domain=cls._cookie_domain(
+                source.get("SKEIN_COOKIE_DOMAIN", base.sso_cookie_domain)
+            ),
         )
+
+    @staticmethod
+    def _cookie_domain(value: str | None) -> str | None:
+        # "host" 或空串 = 不带 Domain（本地 http 调试）；缺省 = 按 unisso 响应。
+        if value is None:
+            return None
+        if value.strip().lower() in ("", "host"):
+            return ""
+        return value

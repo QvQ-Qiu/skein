@@ -383,3 +383,31 @@ export function fetchLogs(params?: {
 export function fetchTopology(): Promise<Topology> {
   return request<Topology>("/internal/topology");
 }
+
+export interface SessionUser {
+  sub: string;
+  name: string;
+  email: string;
+  internal: boolean;
+  picture: string;
+}
+
+export interface SessionInfo {
+  mode: "sso" | "token";
+  user?: SessionUser;
+}
+
+export async function probeSession(): Promise<SessionInfo> {
+  return request<SessionInfo>("/api/session");
+}
+
+export async function loginRequest(email: string, password: string): Promise<SessionInfo> {
+  return request<SessionInfo>("/api/session/login", {
+    method: "POST",
+    body: JSON.stringify({ email, password }),
+  });
+}
+
+export async function logoutRequest(): Promise<void> {
+  await request<{ ok: boolean }>("/api/session/logout", { method: "POST" });
+}

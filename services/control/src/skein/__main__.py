@@ -15,16 +15,24 @@ from skein.channels import HttpWriter
 from skein.config import Config
 from skein.driver import Driver, parse_schedules
 from skein.llm_http import HttpLLM
+from skein.sso import SsoConfig
 
 
 def build() -> tuple:
     cfg = Config.from_env()
     Path(cfg.db_path).parent.mkdir(parents=True, exist_ok=True)
+    Path(cfg.blob_root).parent.mkdir(parents=True, exist_ok=True)
     Path(cfg.blob_root).mkdir(parents=True, exist_ok=True)
     conn = db.connect(cfg.db_path)
     db.migrate(conn)
     writer = HttpWriter(cfg.forum_base, cfg.forum_token)
     llm = HttpLLM(cfg.llm_base, cfg.llm_key) if cfg.llm_base and cfg.llm_key else None
+    sso = SsoConfig(
+        base=cfg.sso_base,
+        client_id=cfg.sso_client_id,
+        client_secret=cfg.sso_client_secret,
+        cookie_domain=cfg.sso_cookie_domain,
+    )
     app = create_app(
         conn,
         cfg.blob_root,
@@ -36,6 +44,7 @@ def build() -> tuple:
         forum_base=cfg.forum_base,
         internal_token=cfg.forum_token,
         platform_repos=cfg.platform_repos,
+        sso_config=sso,
     )
     return app, cfg, conn
 

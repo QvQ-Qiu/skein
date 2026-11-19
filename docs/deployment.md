@@ -111,6 +111,29 @@ systemctl restart skein-control
 
 没有 `dist/` 时控制面退回 `services/console/legacy/` 静态页；旧页始终保留在 `/console-legacy/`。
 
+### UniSSO（内接无感登录）
+
+`/etc/skein/env` 追加：
+
+```ini
+SKEIN_SSO_BASE=https://sso.ssemarket.cn
+SKEIN_SSO_CLIENT_ID=app_xxxx            # /root/unisso-migration/clients/skein.env
+SKEIN_SSO_CLIENT_SECRET=sk_xxxx         # 只进这个文件，600
+# 缺省=按 unisso 响应种（生产 .ssemarket.cn）；host=不带 Domain，仅本地调试
+SKEIN_COOKIE_DOMAIN=
+```
+
+行为与契约（`/root/unisso-migration/SSO-CONTRACT.md`）：
+
+- `GET /api/session`：探测。`{"mode":"token"}` 表示没配 SSO；配了则回验 Cookie，401 落登录页，503 表示 unisso 暂不可用。
+- `POST /api/session/login`：邮箱+密码 → `password/verify` → 种共享 Cookie（名字/域/时长全按响应字段）。
+- `POST /api/session/logout`：`session/revoke` + 双名清 Cookie（`unisso_sid`、`sse_sso`）。
+- `/internal/*` 双认证：`X-Skein-Token`（node-agent、脚本、迁移）或 UniSSO 会话。人必须 `internal=1`。
+- unisso 503/超时不清本地会话；登录接口每 IP 每分钟 10 次。
+- 验收用 E2E 账号 `music-e2e-test@ssemarket.cn`（见 `deploy-check-sso.sh` 样板）。
+
+对外入口：`skein.ssemarket.cn` → `127.0.0.1:7800`（nginx 加 server 块，先 `nginx -t` 再 reload；证书 `certbot certonly -d skein.ssemarket.cn`）。
+
 ## 五、数据迁移
 
 旧库只读，新库可重复迁移：

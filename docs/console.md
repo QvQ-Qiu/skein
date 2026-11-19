@@ -76,7 +76,7 @@ Vue 应用已经接管 `/console/`，静态页保留为 `/console-legacy/` 兜�
 | 图 | 当前自绘力导（`MeshGraph.vue`）；既定方向 AntV G6 | 首版先跑通交互；换 G6 时保留现有数据接口 |
 | 状态 | Pinia | — |
 | 实时 | SSE 或轮询 | 先轮询 `/internal/summary`，后续加 SSE |
-| 鉴权 | `X-Skein-Token`，存 localStorage | 与 API 一致；后续换成 OAuth 会话 |
+| 鉴权 | UniSSO 内接无感登录（Cookie），`X-Skein-Token` 仅留给脚本与 node-agent | 与论坛同一身份；登出双清 `unisso_sid`/`sse_sso` |
 
 **视觉克制，唯一例外是工作台首屏。** 首屏允许一块数据可视化（阵眼雷达 + 闭环流水线），因为它是唯一需要「一眼看懂全局」的页面；图上每个点、每一段都必须挂真实对象。除此之外不引 3D、粒子、视差；其他页面的动效只出现在状态变化处（派单、心跳、租约到期）。
 

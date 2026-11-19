@@ -72,6 +72,9 @@ make run-poll    # 采集循环
 | POST | `/internal/outbox/emit` | 有 | 对外写，单次 |
 | GET | `/internal/summary` | 有 | 计数概览 |
 | GET | `/internal/stream` | 有 | SSE 实时快照：数据变了才推，静默时 15s 一次心跳 |
+| GET | `/api/session` | 无 | 会话探测：sso 模式回验 Cookie；没配 SSO 返回 `{"mode":"token"}` |
+| POST | `/api/session/login` | 无 | 邮箱+密码 → password/verify → 种共享 Cookie（每 IP 10 次/分） |
+| POST | `/api/session/logout` | 无 | session/revoke + 双名清 Cookie |
 | POST | `/internal/tickets/{id}/dispatch` | 有 | 派给在线节点 |
 | POST | `/internal/tickets/{id}/review` | 有 | approve / reject |
 | POST | `/internal/runs` | 有 | 开一次作业运行（按 job+day 去重） |

@@ -15,6 +15,7 @@ import {
 } from "naive-ui";
 import ErrorBar from "./components/ErrorBar.vue";
 import SkyCanvas from "./components/SkyCanvas.vue";
+import { ApiError } from "./api";
 import { useLiveStore } from "./live";
 import { useConsoleStore } from "./store";
 
@@ -24,6 +25,10 @@ const route = useRoute();
 const router = useRouter();
 const tokenDraft = ref(store.token);
 const submitted = ref(false);
+const emailDraft = ref("");
+const passwordDraft = ref("");
+const loginBusy = ref(false);
+const loginError = ref("");
 
 const themeOverrides: GlobalThemeOverrides = {
   common: {
@@ -168,15 +173,48 @@ const PLATFORM_NAV = [
   { label: "日志", key: "/logs" },
 ] as const;
 
-const booting = computed(
-  () =>
-    !store.connected &&
-    store.token.length > 0 &&
-    !store.unauthorized &&
-    !store.error,
-);
+const booting = computed(() => !store.booted);
 
-const landing = computed(() => !store.connected && !booting.value);
+const landing = computed(() => store.booted && !store.connected);
+
+// 503 降级：unisso 挂了但本地还有身份，继续用，顶部挂提示。
+const degraded = computed(() => store.booted && store.ssoDown && store.user != null);
+
+function loginErrorText(err: unknown): string {
+  if (err instanceof ApiError) {
+    if (err.status === 503) return "单点登录暂时不可用，稍后再试";
+    if (err.status === 429) return "尝试次数过多，请 15 分钟后再试";
+    if (err.status === 403 && err.message === "not_internal") return "该账号没有院内身份";
+    if (err.status === 403) return "应用未开通密码校验，请联系管理员";
+    if (err.status === 404) return "控制面未配置 UniSSO";
+    if (err.status === 401) return "邮箱或密码错误";
+    return err.message || "登录失败";
+  }
+  return err instanceof Error && err.message ? err.message : "登录失败";
+}
+
+async function applyLogin() {
+  if (loginBusy.value) return;
+  loginError.value = "";
+  const email = emailDraft.value.trim();
+  if (!email || !passwordDraft.value) {
+    loginError.value = "请输入邮箱和密码";
+    return;
+  }
+  loginBusy.value = true;
+  try {
+    await store.login(email, passwordDraft.value);
+    passwordDraft.value = "";
+  } catch (err) {
+    loginError.value = loginErrorText(err);
+  } finally {
+    loginBusy.value = false;
+  }
+}
+
+async function applyLogout() {
+  await store.logout();
+}
 
 const feedLabel = computed(() => {
   if (!store.connected) return "未连接";
@@ -288,7 +326,38 @@ onMounted(() => {
             </h1>
             <p class="landing__pitch">把真实用户反馈，变成可验收的修复</p>
             <p class="landing__sub">需求即命令 · 会话即工雁 · 账本即阵型</p>
-            <form class="landing__form" @submit.prevent="applyToken">
+            <form
+              v-if="store.authMode !== 'token'"
+              class="landing__form"
+              @submit.prevent="applyLogin"
+            >
+              <n-input
+                v-model:value="emailDraft"
+                class="token-field landing__token"
+                placeholder="学院邮箱"
+                autocomplete="username"
+                :input-props="{ autocomplete: 'username', spellcheck: false, 'aria-label': '学院邮箱' }"
+                @keyup.enter="applyLogin"
+              />
+              <n-input
+                v-model:value="passwordDraft"
+                class="token-field landing__token landing__stack"
+                type="password"
+                placeholder="密码"
+                show-password-on="click"
+                autocomplete="current-password"
+                :input-props="{ autocomplete: 'current-password', spellcheck: false, 'aria-label': '密码' }"
+                @keyup.enter="applyLogin"
+              />
+              <button class="landing__enter" type="submit" :aria-busy="loginBusy">
+                统 一 登 录 →
+              </button>
+              <p v-if="loginError" class="landing__error" role="alert">{{ loginError }}</p>
+              <p v-else-if="store.ssoDown" class="landing__error" role="status">
+                单点登录暂时不可用，稍后再试
+              </p>
+            </form>
+            <form v-else class="landing__form" @submit.prevent="applyToken">
               <n-input
                 v-model:value="tokenDraft"
                 class="token-field landing__token"
@@ -335,7 +404,7 @@ onMounted(() => {
                 <span>最近刷新</span>
                 <time :key="store.lastRefreshAt ?? 0" class="mono" :datetime="refreshIso">{{ refreshLabel }}</time>
               </div>
-              <n-popover trigger="click" placement="bottom-end" :show-arrow="false" raw>
+              <n-popover v-if="store.authMode !== 'sso'" trigger="click" placement="bottom-end" :show-arrow="false" raw>
                 <template #trigger>
                   <n-button quaternary size="small" class="topbar__key">令牌</n-button>
                 </template>
@@ -366,6 +435,10 @@ onMounted(() => {
               >
                 刷新
               </n-button>
+              <div v-if="store.user" class="whoami">
+                <span class="whoami__name">{{ store.user.name || store.user.email }}</span>
+                <button type="button" class="whoami__out" @click="applyLogout">退出</button>
+              </div>
             </div>
           </header>
           <nav v-if="subItems.length" class="subnav" aria-label="二级导航">
@@ -382,6 +455,11 @@ onMounted(() => {
             </button>
           </nav>
           <main class="main">
+            <error-bar
+              v-if="degraded"
+              message="单点登录暂时不可用，已保留本地登录状态"
+              @retry="store.refresh()"
+            />
             <error-bar v-if="store.error" :message="store.error" @retry="store.refresh()" />
             <router-view />
           </main>
