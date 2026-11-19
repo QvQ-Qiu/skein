@@ -1,18 +1,18 @@
 # Worker 运行环境：当前能力、业界方案对比与定稿
 
 > 2026-11-19 · 面向「工雁在哪跑、代码在哪改、隔离做到哪一层」的定稿文档
-> 结论先行：**默认 gVisor 容器（L2），进程沙箱（L1）只留给可信任务，microVM（L3）等有 KVM 的机器；凭据不进沙箱；代码只在仓库里改。**
+> 结论先行：**暂不分级，全部内部可信，统一用 L1 进程沙箱（systemd-run + cgroup + nft）；代码只在仓库里改；gVisor / microVM 作为升级路径备查。**
 
 ## 0. 决策摘要
 
 | 问题 | 定稿 |
 | --- | --- |
-| 代码在哪改 | 仓库里的 worktree；大 pod 只执行，不存代码 |
-| 默认隔离层 | Docker/containerd + **gVisor（runsc）**，一单一容器 |
-| 进程沙箱（systemd-run + cgroup + nft） | 保留，只用于「仓库可信、任务短」的内务活 |
-| microVM（Firecracker 类） | 本机无 `/dev/kvm`，列为 L3，等硬件 |
-| 凭据 | 沙箱里只有短期仓库 token（限分支）与 LLM 网关 key；生产密钥永不进 guest |
-| 出网 | 宿主侧代理白名单（GitHub / LLM 网关 / 控制面） |
+| 代码在哪改 | 仓库里的 worktree；节点只执行，不存代码 |
+| 默认隔离层 | **L1 进程沙箱**（systemd-run + cgroup + nft），所有任务统一 |
+| gVisor（L2） | 代码路径保留，**暂不启用**；接入外部/不可信仓库时再切 |
+| microVM（L3） | 本机无 `/dev/kvm`，不列入当前计划 |
+| 凭据 | 沙箱里只放仓库 deploy key（限分支）与 LLM 网关 key；生产密钥不进 worker |
+| 出网 | nft 端口白名单（GitHub / LLM 网关 / 控制面 / 论坛回环） |
 | harness | 可替换：`claude` 或 `pi`，调度与沙箱不动 |
 | 红线 | 不删 pod；不手改运行中代码；不自动合入 |
 
@@ -67,6 +67,44 @@
 | 集市云面板（YatTerra） | admin 账号 caps = 2C / 2Gi / 5Gi，GPU 不允许 |
 | unisso | WZ8 上 `build/unisso_v2`，frp 13004 → 32004；源码未纳管 |
 | 已用 Docker Runtime | `runc`、`runsc`（qiudock 沙箱在用） |
+
+### 1.7 部署拓扑：每个东西跑在哪（2026-11-19 实测）
+
+三台机器，一条代码线：
+
+| 机器 | 地址 | 角色 |
+| --- | --- | --- |
+| 开发笔记本 | Windows | 代码仓库、Claude 会话、本地预览 |
+| 集市机 A | 175.178.90.215（VM-0-4-ubuntu） | 主力机：入口、主站、秋坞、旧雁阵、P0 演练 |
+| WZ8 | 100.97.31.26（58.249.112.36） | 集市云 k3s 集群（`clouds` 命名空间）；UniSSO |
+
+**集市机 A 上正在跑的**：
+
+| 组件 | 跑法 | 地址 |
+| --- | --- | --- |
+| nginx 反向代理 | 容器 `sse_market_server-nginx_proxy-1` | :80 / :443，所有 `*.ssemarket.cn` |
+| 主站后端 / MySQL / Redis | 容器 `server` / `sse_market_db` / redis | 127.0.0.1:8080 / :3506 / 内网 |
+| 秋坞与 ops 面板等 | k3s `qiudock` 命名空间，52 个 pod | 集群内 |
+| **旧雁阵 controller** | systemd `yanzhen.service`（`server/index.js`） | :3030 |
+| **旧雁阵 node-agent** | systemd `yanzhen-node.service`（`worker/node-agent.mjs`） | peer :9101；注册节点 `n-market-host`「集市机沙箱节点」，容量 3 |
+| **新控制面 P0 演练** | systemd `skein-p0.service` | 127.0.0.1:7801（只读，独立库） |
+| frps | systemd `frps.service` | :7000 控制口、:7501 管理口；把 WZ8:32004 映射为 :13004 |
+
+**WZ8 上**：k3s（:6443）+ 集市云平台管理的几十个 pod；UniSSO `unisso_v2` 监听 127.0.0.1:32004，经 frp 变成 `sso.ssemarket.cn`。
+
+**新体系落地位置**：
+
+| 组件 | 机器 | 形式 | 地址/路径 |
+| --- | --- | --- | --- |
+| `skein-control` | A | systemd `skein-control.service` | 127.0.0.1:7800 |
+| 控制台 | A | 由 control 直接托管 `dist` | `https://skein.ssemarket.cn/console/` |
+| 新 node-agent | A | systemd | peer **:9102**（9101 已被旧节点占用） |
+| worker（cc） | A | systemd-run 瞬态 service，用户 `agent` | `/srv/agent/jobs/<工单>` |
+| 正式库 | A | SQLite WAL | `/srv/skein/skein.db` + `/srv/skein/blobs` |
+| 论坛写回 | A | Outbox → 本地主站 | 127.0.0.1:8080 |
+| SSO | A → WZ8 | 控制面服务端调用 | `https://sso.ssemarket.cn` |
+
+为什么全放 A：内部可信 + A 还有余量（4C / 15.5 GiB，requests 只占 13% / 4%），多一层 pod 只增加网络和部署复杂度。要扩容时，在任何一台机器上再起一个 node-agent 就是加节点，控制面协议不变。
 
 ## 2. 当前方案
 
@@ -174,37 +212,39 @@
 
 ### 4.1 分层
 
+**当前决定：只开 L1 一档到底。** 全部内部、仓库可信，进程沙箱解决的是「别把机器跑爆、别乱读文件、别乱出网」，不是「对抗恶意代码」。
+
 ```
-L1 进程沙箱   systemd-run + cgroup + nft     可信仓库 / 内务任务
-L2 gVisor     docker run --runtime=runsc     默认 worker（一单一容器）
-L3 microVM    Firecracker 类                 有 KVM 的机器 / 未来
+当前   L1 进程沙箱   systemd-run + cgroup + nft    所有 worker
+备查   L2 gVisor     docker run --runtime=runsc     接入外部/不可信仓库时再切（代码路径保留）
+备查   L3 microVM    Firecracker 类                 有 KVM 的机器再做
 ```
 
-原则：**按任务可信度选层，不按心情。** 工单来源是论坛/群消息 → 仓库与 prompt 都可能被注入 → 默认 L2。
+§3.4 的逃逸事件针对的是「恶意仓库」场景；我们现阶段不把外部代码丢进 worker，因此接受 L1 的风险。**什么时候必须升级 L2**：开始接第三方仓库、公开 PR、或工单来源不可控时。
 
 ### 4.2 目标形态
 
 ```
-                     ┌──────────── 控制面（A / skein-control）────────────┐
+                     ┌──────────── 控制面（A / skein-control :7800）───────┐
                      │ 准入 · 工单 · 派工 · 会话权威 · Outbox · 审计       │
                      └───────────────▲───────────────────┬───────────────┘
-                                     │ WS 结果/心跳       │ dispatch
+                                     │ WS :9102 结果/心跳 │ dispatch
                      ┌───────────────┴───────────────────▼───────────────┐
-                     │ 节点（node-agent，宿主 systemd 服务）               │
+                     │ 节点（node-agent，A 上 systemd 服务）               │
                      │  worktree=/srv/agent/jobs/<ticket>                 │
                      │  ┌───────────────────────────────────────────┐    │
-                     │  │ docker run --runtime=runsc --rm            │    │
-                     │  │   --network=none + 宿主代理白名单           │    │
-                     │  │   --read-only 根 + 只挂 worktree/.home      │    │
-                     │  │   环境：短期仓库 token / LLM key / 占位符   │    │
+                     │  │ systemd-run 瞬态 service（user=agent）      │    │
+                     │  │   cgroup：MemoryMax / CPUQuota / TasksMax  │    │
+                     │  │   ProtectSystem=strict + ReadWritePaths    │    │
+                     │  │   nft 端口白名单（GitHub/LLM/控制面/8080）  │    │
                      │  │   harness: claude 或 pi                     │    │
                      │  └───────────────────────────────────────────┘    │
                      └───────────────────────────────────────────────────┘
 ```
 
-- 容器生命周期 = 一次派单；结果与 transcript 先回传，再销毁容器。
-- 清理容器不是「删 pod」；但任何长驻 pod 的停止/重启仍需显式审批。
-- 大 pod 的定位：**它只是节点**。要么是宿主上的 node-agent，要么是集市云里一个会话一个 pod（pod 即沙箱）；它不充当「代码仓库」或「部署中心」。
+- 瞬态 service 的寿命 = 一次派单；结果与 transcript 先回传，再回收。
+- 回收 systemd 瞬态 unit 不是「删 pod」；但任何长驻服务的停止/重启仍需显式审批。
+- 没有「大 pod」这个中间层：节点就是 A 上的 node-agent；扩容 = 在另一台机器再起一个 node-agent。
 
 ### 4.3 凭据与出网（按 Beltdown 的规矩）
 
@@ -236,10 +276,12 @@ unisso 目前只有二进制在跑 → **前置任务**：拿到源码/仓库，
 
 | 阶段 | 内容 | 验收 |
 | --- | --- | --- |
-| P0（本周） | node-agent 增加 `runsc` 档；容器内 secretless env；宿主代理白名单 | 逃逸演练：Beltdown 式 `git` 调用无法出界；容器读不到 `~/.ssh` |
-| P1 | `WORKER_BIN=pi` 适配；容器生命周期与清理；容量守卫 | pi 跑通一张测试单；kill 后无残留进程/容器 |
-| P2 | 集市云「一 pod 一 worker」形态；unisso 三件套；大 pod 接活 | 云端 worker 回传 transcript 与分支；unisso 可被工单修改 |
-| P3 | L3 microVM（有 KVM 时）；快照/回滚 | 恢复到任意 turn |
+| P0（本周） | A 上准备 L1：建 `agent` 用户、`/srv/agent/jobs`、nft 白名单；新 node-agent 用 `PEER_PORT=9102` + `SANDBOX_ENABLED=1` 接入 | 派一张测试单：worker 以 `agent` 运行、超内存被 cgroup 杀、出网只通白名单、结果与 transcript 回来 |
+| P1 | `WORKER_BIN=pi` 适配；worker 生命周期与残留清理；节点容量守卫 | pi 跑通一张测试单；中断后无残留进程与 worktree |
+| P2 | unisso 三件套（源码 → 构建 → 部署）；按需加第二个 node-agent | unisso 可被工单修改并通过部署脚本上线 |
+| 备查 | L2 gVisor 切换；L3 microVM（有 KVM 时） | 接入外部/不可信仓库时启动 |
+
+L1 阶段的验收是「跑不爆、读不到、出不去」，不是「防逃逸」——防逃逸是 L2 的目标。
 
 ## 6. 红线与非目标
 
