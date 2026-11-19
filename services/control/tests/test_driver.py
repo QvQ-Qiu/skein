@@ -3,7 +3,7 @@ from datetime import datetime
 import pytest
 
 from skein import db, runs
-from skein.driver import Driver, parse_schedules
+from skein.driver import Driver, cron_matches, parse_schedules
 
 
 @pytest.fixture()
@@ -33,6 +33,43 @@ def test_due_jobs_matches_minute():
     driver = Driver(conn=None, schedules=parse_schedules('[{"job":"daily","at":"09:15"}]'), commands={})
     assert driver.due_jobs(datetime(2026, 11, 18, 9, 15)) == ["daily"]
     assert driver.due_jobs(datetime(2026, 11, 18, 9, 16)) == []
+
+
+def test_parse_cron_schedule():
+    schedules = parse_schedules(
+        '[{"job":"ingest","cron":"7 */2 * * *"},{"job":"star","cron":"25 9 * * 6"},'
+        '{"job":"bad","cron":"x y"}]'
+    )
+    assert [(s.job, s.cron) for s in schedules] == [
+        ("ingest", "7 */2 * * *"),
+        ("star", "25 9 * * 6"),
+    ]
+
+
+def test_cron_every_two_hours():
+    assert cron_matches("7 */2 * * *", datetime(2026, 11, 19, 10, 7))
+    assert cron_matches("7 */2 * * *", datetime(2026, 11, 19, 0, 7))
+    assert not cron_matches("7 */2 * * *", datetime(2026, 11, 19, 10, 8))
+    assert not cron_matches("7 */2 * * *", datetime(2026, 11, 19, 11, 7))
+
+
+def test_cron_weekday_and_sunday_aliases():
+    assert cron_matches("25 9 * * 6", datetime(2026, 11, 21, 9, 25))
+    assert not cron_matches("25 9 * * 6", datetime(2026, 11, 20, 9, 25))
+    assert cron_matches("0 10 * * 0", datetime(2026, 11, 22, 10, 0))
+    assert cron_matches("0 10 * * 7", datetime(2026, 11, 22, 10, 0))
+
+
+def test_cron_ranges_and_due_jobs():
+    driver = Driver(
+        conn=None,
+        schedules=parse_schedules('[{"job":"ingest","cron":"7 */2 * * *"}]'),
+        commands={},
+    )
+    assert driver.due_jobs(datetime(2026, 11, 19, 14, 7)) == ["ingest"]
+    assert driver.due_jobs(datetime(2026, 11, 19, 14, 8)) == []
+    assert cron_matches("0 9-10 * * 1-5", datetime(2026, 11, 19, 9, 0))
+    assert not cron_matches("0 9-10 * * 1-5", datetime(2026, 11, 21, 9, 0))
 
 
 def test_tick_runs_command_once_per_day(conn):
