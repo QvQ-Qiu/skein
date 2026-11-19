@@ -1,25 +1,50 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 import {
+  fetchEvents,
   fetchSignals,
+  fetchSummary,
   fetchTickets,
   fetchTopology,
   request,
+  type ControlEvent,
   type Signal,
+  type Summary,
   type Ticket,
   type Topology,
 } from "../api";
 import EmptyState from "../components/EmptyState.vue";
 import ErrorBar from "../components/ErrorBar.vue";
+import FlowRibbon, { type FlowStage } from "../components/FlowRibbon.vue";
+import PulseDeck from "../components/PulseDeck.vue";
 
-const review = ref<Ticket[]>([]);
-const signals = ref<Signal[]>([]);
+const summary = ref<Summary | null>(null);
 const topology = ref<Topology | null>(null);
+const signals = ref<Signal[]>([]);
+const tickets = ref<Ticket[]>([]);
+const events = ref<ControlEvent[]>([]);
 const loading = ref(true);
 const error = ref<string | null>(null);
 const acting = ref<string | null>(null);
 let alive = true;
 let timer: number | undefined;
+
+const byStatus = computed(() => summary.value?.tickets.by_status ?? {});
+const reviewCount = computed(() => byStatus.value.review ?? 0);
+const doneCount = computed(() => byStatus.value.done ?? 0);
+const rejectedCount = computed(() => byStatus.value.rejected ?? 0);
+const activeTickets = computed(
+  () =>
+    (byStatus.value.staged ?? 0) +
+    (byStatus.value.assigned ?? 0) +
+    (byStatus.value.running ?? 0),
+);
+
+const reviewTickets = computed(() =>
+  tickets.value
+    .filter((ticket) => ticket.status === "review")
+    .sort((a, b) => b.updated_at - a.updated_at),
+);
 
 const activeDispatches = computed(
   () =>
@@ -27,18 +52,113 @@ const activeDispatches = computed(
       ["dispatched", "created", "pending"].includes(item.state),
     ).length ?? 0,
 );
+const onlineNodes = computed(
+  () => topology.value?.nodes.filter((node) => node.status === "online").length ?? 0,
+);
 const sessionCount = computed(() => topology.value?.sessions.length ?? 0);
+
 const stalled = computed(() =>
   signals.value.filter((item) =>
     ["dispatch_timeout", "node_offline_with_work"].includes(item.kind),
   ),
 );
 const failures = computed(() =>
-  signals.value.filter((item) =>
-    ["run_failed", "effect_failed"].includes(item.kind),
-  ),
+  signals.value.filter((item) => ["run_failed", "effect_failed"].includes(item.kind)),
 );
-const topSignals = computed(() => stalled.value.concat(failures.value).slice(0, 4));
+const topSignals = computed(() => stalled.value.concat(failures.value).slice(0, 5));
+
+const verdicts = computed(() => summary.value?.events.by_verdict ?? {});
+
+const stages = computed<FlowStage[]>(() => [
+  {
+    key: "intake",
+    label: "反馈",
+    value: summary.value?.events.total ?? 0,
+    sub: `忽略 ${verdicts.value.ignore ?? 0} · 记录 ${verdicts.value.record ?? 0}`,
+    tone: "cyan",
+    to: "/events",
+  },
+  {
+    key: "admission",
+    label: "准入",
+    value: verdicts.value.process ?? 0,
+    sub: "程序判定，不调模型",
+    tone: "violet",
+    to: "/platform",
+  },
+  {
+    key: "ticket",
+    label: "工单",
+    value: summary.value?.tickets.total ?? 0,
+    sub: `进行中 ${activeTickets.value}`,
+    tone: "cyan",
+    to: "/tickets",
+  },
+  {
+    key: "dispatch",
+    label: "派工",
+    value: activeDispatches.value,
+    sub: `${onlineNodes.value}/${topology.value?.nodes.length ?? 0} 节点在线`,
+    tone: "amber",
+    to: "/fleet",
+  },
+  {
+    key: "deliver",
+    label: "交付",
+    value: reviewCount.value,
+    sub: "等你验收",
+    tone: "amber",
+    to: "/tickets",
+  },
+  {
+    key: "review",
+    label: "验收",
+    value: doneCount.value,
+    sub: `驳回 ${rejectedCount.value}`,
+    tone: "ok",
+    to: "/tickets",
+  },
+]);
+
+const recentDelivered = computed(() =>
+  tickets.value
+    .filter((ticket) => ["done", "rejected"].includes(ticket.status))
+    .sort((a, b) => b.updated_at - a.updated_at)
+    .slice(0, 4),
+);
+
+const feed = computed(() => events.value.slice(0, 8));
+
+const ORIGIN: Record<string, string> = {
+  forum_post: "论坛帖",
+  forum_comment: "论坛评论",
+  im: "群消息",
+  rss: "订阅",
+  manual: "手动",
+};
+
+const VERDICT: Record<string, { label: string; tone: string }> = {
+  process: { label: "处理", tone: "ok" },
+  record: { label: "记录", tone: "muted" },
+  ignore: { label: "忽略", tone: "bad" },
+};
+
+function originLabel(origin: string): string {
+  return ORIGIN[origin] ?? origin;
+}
+
+function verdictOf(event: ControlEvent) {
+  return VERDICT[event.verdict] ?? { label: event.verdict, tone: "muted" };
+}
+
+function ago(ts: number): string {
+  if (!ts) return "";
+  const diff = Math.max(0, Date.now() / 1000 - ts);
+  if (diff < 60) return "刚刚";
+  if (diff < 3600) return `${Math.floor(diff / 60)} 分钟前`;
+  if (diff < 86400) return `${Math.floor(diff / 3600)} 小时前`;
+  return `${Math.floor(diff / 86400)} 天前`;
+}
 
 function signalText(signal: Signal): string {
   switch (signal.kind) {
@@ -58,16 +178,22 @@ function signalText(signal: Signal): string {
 async function load() {
   loading.value = true;
   error.value = null;
-  const [tickets, signalList, topo] = await Promise.allSettled([
-    fetchTickets({ status: "review", limit: 20 }),
-    fetchSignals(),
+  const [sum, topo, signalList, ticketList, eventList] = await Promise.allSettled([
+    fetchSummary(),
     fetchTopology(),
+    fetchSignals(),
+    fetchTickets({ limit: 100 }),
+    fetchEvents({ limit: 12 }),
   ]);
   if (!alive) return;
-  if (tickets.status === "fulfilled") review.value = tickets.value.tickets;
-  if (signalList.status === "fulfilled") signals.value = signalList.value.signals;
+  if (sum.status === "fulfilled") summary.value = sum.value;
   if (topo.status === "fulfilled") topology.value = topo.value;
-  const failed = [tickets, signalList, topo].filter((item) => item.status === "rejected");
+  if (signalList.status === "fulfilled") signals.value = signalList.value.signals;
+  if (ticketList.status === "fulfilled") tickets.value = ticketList.value.tickets;
+  if (eventList.status === "fulfilled") events.value = eventList.value.events;
+  const failed = [sum, topo, signalList, ticketList, eventList].filter(
+    (item) => item.status === "rejected",
+  );
   error.value = failed.length
     ? failed
         .map((item) =>
@@ -115,27 +241,45 @@ onBeforeUnmount(() => {
 <template>
   <section class="today">
     <header class="today__head">
-      <div>
+      <div class="today__title">
         <h2>工作台</h2>
-        <p class="muted">先处理需要你的事，再看系统状态。</p>
+        <p class="muted">现在有什么要我处理 · 谁在干什么 · 卡在哪</p>
       </div>
-      <button type="button" class="ghost" :disabled="loading" @click="load">
-        {{ loading ? "刷新中" : "刷新" }}
-      </button>
+      <div class="today__meta">
+        <span class="muted mono">{{ sessionCount }} 会话</span>
+        <button type="button" class="ghost" :disabled="loading" @click="load">
+          {{ loading ? "刷新中" : "刷新" }}
+        </button>
+      </div>
     </header>
 
     <error-bar v-if="error" :message="error" @retry="load" />
 
-    <div class="cards">
-      <article class="card card--review">
-        <header class="card__head">
-          <span>待你验收</span>
-          <b class="card__number">{{ review.length }}</b>
+    <PulseDeck
+      :nodes="topology?.nodes ?? []"
+      :sessions="topology?.sessions ?? []"
+      :tickets="tickets"
+      :dispatches="topology?.dispatches ?? []"
+      :review="reviewCount"
+      :stalled="stalled.length + failures.length"
+      :running="activeDispatches"
+      :delivered="doneCount"
+    />
+
+    <FlowRibbon :stages="stages" :active="activeDispatches" />
+
+    <div class="lanes">
+      <article class="panel panel--review">
+        <header class="panel__head">
+          <h3>待你验收</h3>
+          <span class="panel__count mono">{{ reviewCount }}</span>
+          <router-link to="/tickets" class="panel__more">全部需求 →</router-link>
         </header>
-        <div v-if="review.length" class="rows">
-          <div v-for="ticket in review.slice(0, 5)" :key="ticket.id" class="row">
+        <div v-if="reviewTickets.length" class="rows">
+          <div v-for="ticket in reviewTickets.slice(0, 6)" :key="ticket.id" class="row">
             <span class="mono code">{{ ticket.code }}</span>
             <span class="title">{{ ticket.title }}</span>
+            <span class="muted stamp">{{ ago(ticket.updated_at) }}</span>
             <span class="actions">
               <button
                 type="button"
@@ -159,18 +303,31 @@ onBeforeUnmount(() => {
         <empty-state
           v-else
           title="没有待验收的工单"
-          description="工雁交付后会出现在这里。"
+          description="工雁交付后会出现在这里；系统不会自动合入。"
         />
-        <router-link to="/tickets" class="more">查看全部需求 →</router-link>
+        <div v-if="recentDelivered.length" class="delivered">
+          <span class="muted">最近交付</span>
+          <span v-for="ticket in recentDelivered" :key="ticket.id" class="chip">
+            <span class="mono">{{ ticket.code }}</span>
+            <b :class="ticket.status === 'done' ? 'ok' : 'bad'">
+              {{ ticket.status === "done" ? "已通过" : "已驳回" }}
+            </b>
+          </span>
+        </div>
       </article>
 
-      <article class="card card--signals">
-        <header class="card__head">
-          <span>卡住的事</span>
-          <b class="card__number">{{ topSignals.length }}</b>
+      <article class="panel panel--stuck">
+        <header class="panel__head">
+          <h3>卡住的事</h3>
+          <span class="panel__count panel__count--bad mono">{{ topSignals.length }}</span>
+          <router-link to="/signals" class="panel__more">全部信号 →</router-link>
         </header>
         <div v-if="topSignals.length" class="rows">
-          <div v-for="signal in topSignals" :key="`${signal.kind}-${signal.id}`" class="row row--signal">
+          <div
+            v-for="signal in topSignals"
+            :key="`${signal.kind}-${signal.id}`"
+            class="row row--signal"
+          >
             <span class="dot" aria-hidden="true"></span>
             <span class="title">{{ signalText(signal) }}</span>
           </div>
@@ -180,28 +337,35 @@ onBeforeUnmount(() => {
           title="没有卡住的派工"
           description="派工超时、作业失败、写回失败或节点离线会出现在这里。"
         />
-        <router-link to="/signals" class="more">查看全部信号 →</router-link>
       </article>
 
-      <article class="card card--running">
-        <header class="card__head">
-          <span>正在跑</span>
-          <b class="card__number">{{ activeDispatches }}</b>
+      <article class="panel panel--feed">
+        <header class="panel__head">
+          <h3>阵中动态</h3>
+          <span class="panel__count panel__count--muted mono">{{ feed.length }}</span>
+          <router-link to="/events" class="panel__more">事件流 →</router-link>
         </header>
-        <dl class="running">
-          <dt>在途派工</dt>
-          <dd class="mono">{{ activeDispatches }}</dd>
-          <dt>已记录会话</dt>
-          <dd class="mono">{{ sessionCount }}</dd>
-        </dl>
-        <p class="muted hint">点进运行面看拓扑、节点和会话。</p>
-        <router-link to="/fleet" class="more">进入运行 →</router-link>
+        <ol v-if="feed.length" class="feed">
+          <li v-for="event in feed" :key="event.id" class="feed__item">
+            <span class="verdict" :class="`verdict--${verdictOf(event).tone}`">
+              {{ verdictOf(event).label }}
+            </span>
+            <span class="feed__text">
+              {{ originLabel(event.origin) }}
+              <span class="mono muted">{{ event.origin_id }}</span>
+            </span>
+            <span class="muted stamp">{{ ago(event.created_at) }}</span>
+          </li>
+        </ol>
+        <empty-state
+          v-else
+          title="还没有反馈进来"
+          description="论坛帖、评论、群消息被采集后会在这里排成一条流。"
+        />
       </article>
     </div>
 
-    <p v-if="loading && !review.length && !topSignals.length" class="muted loading">
-      正在读取工作台…
-    </p>
+    <p v-if="loading && !summary && !topology" class="muted loading">正在读取工作台…</p>
   </section>
 </template>
 
@@ -215,10 +379,10 @@ onBeforeUnmount(() => {
   align-items: flex-start;
   justify-content: space-between;
   gap: 16px;
-  margin-bottom: 14px;
+  margin-bottom: 12px;
 }
 
-.today__head h2 {
+.today__title h2 {
   margin: 0;
   color: var(--text);
   font-size: 16px;
@@ -226,9 +390,17 @@ onBeforeUnmount(() => {
   letter-spacing: 0.14em;
 }
 
-.today__head p {
+.today__title p {
   margin: 4px 0 0;
   font-size: 12px;
+}
+
+.today__meta {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  font-size: 11px;
+  letter-spacing: 0.1em;
 }
 
 .ghost {
@@ -245,74 +417,101 @@ onBeforeUnmount(() => {
   text-shadow: 0 0 10px rgba(79, 216, 235, 0.65);
 }
 
-.cards {
+.lanes {
   display: grid;
-  grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr) minmax(0, 0.9fr);
+  grid-template-columns: minmax(0, 1.55fr) minmax(0, 1fr) minmax(0, 1fr);
   gap: 12px;
+  align-items: stretch;
 }
 
-@media (max-width: 1100px) {
-  .cards {
-    grid-template-columns: minmax(0, 1fr);
+@media (max-width: 1240px) {
+  .lanes {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  }
+
+  .panel--feed {
+    grid-column: 1 / -1;
   }
 }
 
-.card {
+@media (max-width: 820px) {
+  .lanes {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .panel--feed {
+    grid-column: auto;
+  }
+}
+
+.panel {
   display: flex;
   flex-direction: column;
   min-width: 0;
   padding: 12px 14px 10px;
   background: var(--bg-elevated);
   border: 1px solid var(--line);
-  border-left: 2px solid var(--line);
+  border-top: 2px solid var(--line);
 }
 
-.card--review {
-  border-left-color: var(--amber);
+.panel--review {
+  border-top-color: var(--amber);
 }
 
-.card--signals {
-  border-left-color: var(--bad);
+.panel--stuck {
+  border-top-color: var(--bad);
 }
 
-.card--running {
-  border-left-color: var(--cyan);
+.panel--feed {
+  border-top-color: var(--cyan);
 }
 
-.card__head {
+.panel__head {
   display: flex;
   align-items: baseline;
-  justify-content: space-between;
-  gap: 12px;
-  color: var(--muted);
-  font-size: 12px;
+  gap: 10px;
+  min-width: 0;
+}
+
+.panel__head h3 {
+  margin: 0;
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 600;
   letter-spacing: 0.14em;
 }
 
-.card__number {
-  color: var(--text);
-  font-family: var(--mono);
-  font-size: 26px;
-  line-height: 1;
-  font-weight: 700;
-}
-
-.card--review .card__number {
+.panel__count {
   color: var(--amber);
+  font-size: 18px;
+  font-weight: 700;
+  line-height: 1;
 }
 
-.card--signals .card__number {
+.panel__count--bad {
   color: var(--bad);
 }
 
-.card--running .card__number {
+.panel__count--muted {
+  color: var(--muted);
+}
+
+.panel__more {
+  margin-left: auto;
+  color: var(--muted);
+  font-size: 11px;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.panel__more:hover {
   color: var(--cyan);
 }
 
 .rows {
   display: flex;
   flex-direction: column;
-  margin-top: 8px;
+  margin-top: 6px;
 }
 
 .row {
@@ -339,14 +538,20 @@ onBeforeUnmount(() => {
   white-space: nowrap;
 }
 
+.stamp {
+  flex: 0 0 auto;
+  font-size: 10px;
+  letter-spacing: 0.04em;
+}
+
 .row--signal {
   align-items: flex-start;
-  color: var(--text);
 }
 
 .row--signal .title {
   white-space: normal;
   overflow-wrap: anywhere;
+  line-height: 1.5;
 }
 
 .actions {
@@ -389,38 +594,81 @@ onBeforeUnmount(() => {
   box-shadow: 0 0 8px var(--bad);
 }
 
-.running {
-  display: grid;
-  grid-template-columns: 1fr auto;
-  gap: 6px 12px;
-  margin: 12px 0 8px;
+.delivered {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: auto;
+  padding-top: 10px;
+  font-size: 11px;
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 7px;
+  border: 1px solid rgba(48, 58, 84, 0.8);
+  font-size: 11px;
+}
+
+.chip b {
+  font-weight: 500;
+}
+
+.chip .ok {
+  color: var(--ok);
+}
+
+.chip .bad {
+  color: var(--bad);
+}
+
+.feed {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  margin: 6px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.feed__item {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 6px 0;
+  border-bottom: 1px solid rgba(125, 137, 184, 0.12);
   font-size: 12px;
 }
 
-.running dt {
+.feed__text {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.verdict {
+  flex: 0 0 auto;
+  padding: 1px 5px;
+  border: 1px solid currentColor;
+  font-size: 10px;
+  letter-spacing: 0.06em;
+}
+
+.verdict--ok {
+  color: var(--ok);
+}
+
+.verdict--muted {
   color: var(--muted);
 }
 
-.running dd {
-  margin: 0;
-  font-size: 15px;
-}
-
-.hint {
-  margin: 0 0 10px;
-  font-size: 12px;
-}
-
-.more {
-  margin-top: auto;
-  padding-top: 8px;
-  color: var(--cyan);
-  font-size: 12px;
-  text-decoration: none;
-}
-
-.more:hover {
-  text-shadow: 0 0 10px rgba(79, 216, 235, 0.65);
+.verdict--bad {
+  color: var(--bad);
 }
 
 .mono {

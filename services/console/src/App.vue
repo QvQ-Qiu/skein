@@ -10,6 +10,7 @@ import {
   NDialogProvider,
   NInput,
   NMessageProvider,
+  NPopover,
   type GlobalThemeOverrides,
 } from "naive-ui";
 import ErrorBar from "./components/ErrorBar.vue";
@@ -316,18 +317,28 @@ onMounted(() => {
                 <span>最近刷新</span>
                 <time :key="store.lastRefreshAt ?? 0" class="mono" :datetime="refreshIso">{{ refreshLabel }}</time>
               </div>
-              <form class="topbar__token" @submit.prevent="applyToken">
-                <n-input
-                  v-model:value="tokenDraft"
-                  class="token-field"
-                  size="small"
-                  type="password"
-                  placeholder="令牌"
-                  autocomplete="off"
-                  :input-props="{ autocomplete: 'off', spellcheck: false, 'aria-label': '控制面令牌' }"
-                  @keyup.enter="applyToken"
-                />
-              </form>
+              <n-popover trigger="click" placement="bottom-end" :show-arrow="false" raw>
+                <template #trigger>
+                  <n-button quaternary size="small" class="topbar__key">令牌</n-button>
+                </template>
+                <form class="keypop" @submit.prevent="applyToken">
+                  <span class="keypop__title">控制面令牌</span>
+                  <n-input
+                    v-model:value="tokenDraft"
+                    class="token-field"
+                    size="small"
+                    type="password"
+                    placeholder="与 SKEIN_TOKEN 相同"
+                    autocomplete="off"
+                    :input-props="{ autocomplete: 'off', spellcheck: false, 'aria-label': '控制面令牌' }"
+                    @keyup.enter="applyToken"
+                  />
+                  <n-button type="primary" size="small" attr-type="submit" :loading="store.refreshing">
+                    应用
+                  </n-button>
+                  <p v-if="gateMessage" class="keypop__error" role="alert">{{ gateMessage }}</p>
+                </form>
+              </n-popover>
               <n-button
                 class="topbar__refresh"
                 quaternary

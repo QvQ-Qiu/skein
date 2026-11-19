@@ -471,10 +471,6 @@ input {
   .brand__sub {
     display: none;
   }
-
-  .topbar__token {
-    width: 120px;
-  }
 }
 
 @media (max-width: 980px) {
@@ -503,10 +499,6 @@ input {
 
   .topbar__meta {
     margin-left: auto;
-  }
-
-  .topbar__token {
-    width: 96px;
   }
 }
 
@@ -563,10 +555,33 @@ input {
   animation: stamp-in 0.35s ease;
 }
 
-.topbar__token {
+.topbar__key {
   flex: 0 0 auto;
-  width: 148px;
+  letter-spacing: 2px;
+}
+
+.keypop {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 244px;
+  padding: 12px;
+  background: var(--bg-header);
+  border: 1px solid var(--line);
+  box-shadow: 0 12px 32px -18px #000;
+}
+
+.keypop__title {
+  color: var(--muted);
+  font-size: 11px;
+  letter-spacing: 0.16em;
+}
+
+.keypop__error {
   margin: 0;
+  color: var(--bad);
+  font-size: 11px;
+  overflow-wrap: anywhere;
 }
 
 .topbar__refresh {

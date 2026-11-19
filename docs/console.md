@@ -1,42 +1,62 @@
-# 控制台计划
+# 控制台
 
-> 2026-11-19 · 现状是静态页，目标是 Vue 3 + naive-ui 的实体控制台
+> 2026-11-19 · Vue 3 + naive-ui；`services/console/dist` 由控制面挂在 `/console/`
 
 ## 一、现状
 
-控制面已经托管一个**无构建的静态页**：`http://127.0.0.1:7800/console/`。
+Vue 应用已经接管 `/console/`，静态页保留为 `/console-legacy/` 兜底。
 
-| 视图 | 数据来源 | 能做什么 |
-| --- | --- | --- |
-| 概览 | `/internal/summary` | 事件、Thread、工单、待验收、会话、影子判定的计数 |
-| 工单 | `/internal/tickets` | 列表；通过/驳回；派单 |
-| 节点 | `/internal/nodes` | 在线状态、平台、容量、最后心跳 |
-| 运行 | `/internal/runs` | 作业、日期、状态、说明 |
-| 信号 | `/internal/signals` | 派单超时、作业失败、写回失败、节点离线 |
-| 提示词 | `/internal/prompts` | 稳定/金丝雀指针；升格、回退、解冻 |
+| 路由 | 页面 | 数据来源 | 能做什么 |
+| --- | --- | --- | --- |
+| `/today` | 工作台 | summary / topology / tickets / signals / events | 阵眼、流水线、验收、看卡点 |
+| `/tickets` | 需求 | `/internal/tickets` | 列表；通过/驳回；派单；详情抽屉 |
+| `/tickets/:id` | 需求详情 | `/internal/tickets/{id}` | 深链直接打开某张单 |
+| `/fleet` | 运行总览 | `/internal/topology` | 力导网：节点 / 工单 / 会话 / 订阅 |
+| `/nodes` | 节点 | `/internal/nodes` | 在线状态、平台、容量、最后心跳 |
+| `/workers` | Worker | `/internal/sessions` | 会话列表；transcript 时间线 |
+| `/events` | 事件 | `/internal/events` | 实时流 + 准入判定 + 按 Thread 聚合 |
+| `/signals` | 信号 | `/internal/signals` | 派单超时、作业失败、写回失败、节点离线 |
+| `/platform` | 平台 | `/internal/admission`、`/internal/prompts` | 准入矩阵、提示词升格/回退/解冻 |
+| `/logs` | 日志 | `/internal/logs` | 按组件与级别过滤 |
+| `/about` | 说明 | — | 产品自述与闭环图 |
 
-文件在 `services/console/`：`index.html`、`app.js`、`style.css`。改完刷新即生效。
-
-这一版的目的只有一个：**切换期间人能在浏览器里验收工单和看告警**，不追求信息架构。ops 面板下线后，它的告警能力由「信号」页承接。
+源码在 `services/console/src/`。构建：`npm ci && npm run build`，产物 `dist/`；控制面启动时优先挂 `dist`，没有构建产物才退回 `legacy/`。
 
 ## 二、目标形态
 
-以实体为中心，六页一级导航：
+一级导航按 [product.md](product.md) 收敛为四个工作面：
 
 ```
-总览 Fleet │ 工单 Tickets │ Worker │ 节点 Nodes │ 事件 Events │ 平台 Platform
+工作台 Today │ 需求 Tickets │ 运行 Fleet │ 平台 Platform
 ```
 
-| 页 | 回答什么 | 核心组件 |
+| 工作面 | 回答什么 | 核心组件 |
 | --- | --- | --- |
-| 总览 | 现在谁在干什么、卡在哪 | 全屏拓扑（G6 力导）+ 顶部指标条 + 实体抽屉 |
-| 工单 | 排队与验收 | 高密度表格 + 详情三栏（正文/各路回报/验收动作） |
-| Worker | 这个 worker 卡在哪一步 | transcript 时间线、工具调用折叠、分支与 diffstat |
-| 节点 | 哪台机器在跑、健不健康 | 卡片网格、心跳延迟、并发会话数 |
-| 事件 | 一条 Trigger 怎么变成工单 | 实时流 + 准入判定 + 按 Thread 聚合 |
-| 平台 | 为什么这么判、怎么改 | 准入矩阵编辑、提示词修订、审计、成本 |
+| 工作台 | 现在要我做什么 | 阵眼（指标 + 雷达）、闭环流水线、待验收队列、卡住的事、阵中动态 |
+| 需求 | 这件事走到哪了 | 高密度表格 + 详情三栏（正文/各路回报/验收动作） |
+| 运行 | 谁在跑、卡在哪 | 总览力导网（节点/工单/会话）、节点、Worker、事件、信号 |
+| 平台 | 为什么这么判、怎么改 | 准入矩阵编辑、提示词修订、运行记录、审计、日志 |
 
 完整 IA 与视觉规则见 `docs/plan.md` 的对应章节与评审包里的面板重设计稿（服务器 `/root/superagent-review/`）。
+
+### 工作台首屏
+
+首屏回答三个问题，顺序就是优先级：
+
+```
+┌ 阵眼 ─────────────────────────────────────────────┐
+│ 待你验收 │ 卡住的事 │       极坐标阵图（实时）      │
+│ 正在跑   │ 已验收   │  节点 / 会话 / 工单 / 在途边   │
+├ 闭环流水线 ───────────────────────────────────────┤
+│ 01 反馈 → 02 准入 → 03 工单 → 04 派工 → 05 交付 → 06 验收 │
+├ 三栏 ─────────────────────────────────────────────┤
+│ 待验收队列（含通过/驳回） │ 卡住的事 │ 阵中动态      │
+└───────────────────────────────────────────────────┘
+```
+
+- **阵眼**的每个数字都能点回列表；雷达上的每个点对应一个真实对象，不画没有数据的装饰。
+- **流水线**六段都是真实计数，点某一段就进到那一段的列表。
+- 数据来自 `/internal/summary`、`/internal/topology`、`/internal/tickets`、`/internal/signals`、`/internal/events`，每 15 秒刷新。
 
 ## 三、技术选型
 
@@ -44,34 +64,39 @@
 | --- | --- | --- |
 | 框架 | Vue 3 + Vite | 两套现有面板都是 Vue 3，复用面最大 |
 | 组件库 | naive-ui | ops-console 已在用，避免两套组件 |
-| 图 | AntV G6 | 既定选型；dagre 布局、combo 分组、minimap |
+| 图 | 当前自绘力导（`MeshGraph.vue`）；既定方向 AntV G6 | 首版先跑通交互；换 G6 时保留现有数据接口 |
 | 状态 | Pinia | — |
 | 实时 | SSE 或轮询 | 先轮询 `/internal/summary`，后续加 SSE |
 | 鉴权 | `X-Skein-Token`，存 localStorage | 与 API 一致；后续换成 OAuth 会话 |
 
-**不引 3D、粒子、视差；装饰性循环动画一律不做。** 动效只在状态变化处出现（派单、心跳、租约到期）。
+**视觉克制，唯一例外是工作台首屏。** 首屏允许一块数据可视化（阵眼雷达 + 闭环流水线），因为它是唯一需要「一眼看懂全局」的页面；图上每个点、每一段都必须挂真实对象。除此之外不引 3D、粒子、视差；其他页面的动效只出现在状态变化处（派单、心跳、租约到期）。
 
-## 四、接口差距
+两个例外条款：
 
-现在够用，但目标形态还需要补：
+- 所有循环动画必须尊重 `prefers-reduced-motion: reduce`，该开时画静态帧。
+- 雷达与流水线在无数据时安静降级（空环、零值），不做「演示数据」。
 
-| 需要 | 现状 | 要加的接口 |
+## 四、接口与能力差距
+
+已上线的接口不再列。还缺的：
+
+| 需要 | 现状 | 要加的 |
 | --- | --- | --- |
-| 工单详情 | 只有列表 | `GET /internal/tickets/{id}`（含 assignments、dispatch、result） |
-| Worker 列表与 transcript | 无 | `GET /internal/sessions`、`GET /internal/sessions/{id}/turns` |
-| 事件流 | 无 | `GET /internal/events?since=`、`GET /internal/threads/{id}` |
-| 拓扑数据 | 节点与工单分散 | `GET /internal/topology`（节点/工单/派工/订阅的边） |
-| 准入矩阵编辑 | 无 | `GET/PUT /internal/admission` |
+| 实时推送 | 工作台 15 秒轮询 | SSE `/internal/stream`（summary + signals 事件） |
 | 成本 | 无 | 网关侧按 run 汇总，或在 `summary` 里加 |
+| 鉴权 | `localStorage` 令牌 | OAuth 会话，与论坛身份一致 |
+| 力导网 | 自绘力导 | 换 AntV G6（dagre / combo / minimap），保留 `MeshGraph` 的数据装配层 |
+| 工作台队列分页 | 只取前 100 张单 | 服务端按状态分页，队列懒加载 |
 
-## 五、迁移步骤
+## 五、构建与部署
 
-1. **保持静态页可用**（现在），切换与验收期间它就是唯一的验收入口。
-2. **补接口**：上表里的前四项，先服务静态页，再服务 Vue。
-3. **搭 Vue 骨架**：`services/console` 加 `package.json`、`vite.config.ts`、`src/`；先做「工单」与「信号」两页，覆盖最高频的两个动作（验收、看告警）。
-4. **接管路由**：Vue 构建产物输出到 `services/console/dist`，控制面把 `/console` 的挂载目录切到 `dist`；静态页保留为 `/console-legacy`。
-5. **补齐其余四页**：总览拓扑、Worker、节点、事件、平台。
-6. **鉴权升级**：从 localStorage 令牌换成 OAuth 会话（与论坛身份一致）。
+```bash
+cd services/console
+npm ci
+npm run build
+```
+
+产物在 `services/console/dist`。控制面启动时若发现 `dist`，就把 `/console/` 挂到它；没有则退回 `legacy/`，旧页仍在 `/console-legacy/`。改完重启控制面即可，不需要单独部署前端。
 
 ## 六、验收标准
 
@@ -81,8 +106,16 @@
 - 断开 7800 后页面给出明确错误，不白屏；
 - 页面在 1280×720 与 1920×1080 下无横向滚动。
 
+工作台首屏另加四条：
+
+- 1280×720 首屏能看到阵眼四个数字、六段流水线，以及待验收队列的第一行；
+- 阵眼四个数字点进去落到对应列表；
+- 流水线六段点进去落到对应页面；
+- 无数据时雷达画空环、流水线显示 0，不出现假数据。
+
 ## 七、不做
 
 - 不做移动端适配（桌面优先）。
 - 不做主题切换（深色定版）。
 - 不做自定义仪表盘拖拽。
+- 不做演示数据；空态就说空态。

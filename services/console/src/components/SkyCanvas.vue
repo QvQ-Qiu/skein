@@ -124,9 +124,10 @@ function frame(now: number) {
   if (landing) {
     const c = (t % 26) / 26;
     lx = (-0.12 + c * 1.24) * width;
-    ly = height * (0.34 + 0.07 * Math.sin(c * 6.28 * 1.5));
+    // 从标题上方掠过，避免压在字上影响阅读
+    ly = height * (0.16 + 0.06 * Math.sin(c * 6.28 * 1.5));
     ang = Math.atan2(
-      ((0.07 * 6.28 * 1.5 * Math.cos(c * 6.28 * 1.5) * height) / 26),
+      ((0.06 * 6.28 * 1.5 * Math.cos(c * 6.28 * 1.5) * height) / 26),
       (1.24 * width) / 26,
     );
   } else {
