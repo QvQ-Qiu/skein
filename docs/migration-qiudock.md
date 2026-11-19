@@ -81,8 +81,19 @@
 
 **未完成**
 
-- ops 面仍在 qiudock 命名空间（k8s Deployment），依赖 `QDOCK_*`（MCP/沙箱/指标）；
-  工具面要映射到 Skein 的节点、日志、worker，或被明确裁掉，替换完成前不关 qdockd。
+**ops 面已迁出 k8s，指标源换成雁阵（2026-11-19）**
+
+- 以 `xiaoqiu:1.0.96-sso` 为基底打补丁镜像 `xiaoqiu:1.0.97-skein`（构建件见
+  `deploy/xiaoqiu-skein-metrics/`）：指标采集改读控制面 `summary/signals/topology`，
+  存 `qdock_metric_samples`（前缀 `skein_`）；告警新增「待验收积压 / 卡住信号 / 节点离线 / 采集断供」。
+- 容器 `xiaoqiu-ops` 跑在 8118（host 网络、挂 `/srv/go-log` 与 docker.sock、日志限容）。
+- nginx `opsagent_backend` 上游从 8100 切到 8118；`ag-xiaoqiu-ops-v-2611041612` 已 `replicas=0`。
+- 验证：容器健康、`/ops/login` 直连与公网均 200、采样表出现 `skein_review_backlog` 等、8100 已停。
+- 回滚：scale 回 1 + 恢复 `nginx.conf.bak-ops-cutover-*` + 停容器。
+
+**未完成**
+
+- ops 面的「秋坞动作类工具」（deploy/kill/沙箱）仍走 qdockd API；qdockd 下线前要替换或明确裁掉。
 - 面板（ops-console）仍走自己的路径；下线前需要把「服务状态 + 服务日志」补到 Skein 控制台。
 
 ### P5 面板与平台
