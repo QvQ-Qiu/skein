@@ -12,7 +12,7 @@ import WebSocket, { WebSocketServer } from 'ws';
 import { spawn, execFileSync } from 'node:child_process';
 import { createServer } from 'node:http';
 import { hostname, networkInterfaces } from 'node:os';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { TranscriptSync } from './transcript-sync.mjs';
@@ -84,8 +84,26 @@ const SAFE_TOOLS = env.WORKER_ALLOWED_TOOLS || [
   'Bash(find:*)', 'Bash(wc:*)', 'Bash(diff:*)', 'Bash(node --check:*)', 'Bash(npm test:*)',
   'Bash(npm run test:*)', 'Bash(npx vitest:*)', 'Bash(python3 -m pytest:*)', 'Bash(pwd)', 'Bash(echo:*)',
 ].join(',');
+// 每单独立 HOME：cc 的配置与缓存不落进仓库，也不写节点的 ~。
+function jobHome(workerId, repo) {
+  const home = join(dirname(repo), 'home-' + (workerId || 'adhoc'));
+  mkdirSync(join(home, '.claude'), { recursive: true });
+  mkdirSync(join(home, '.npm'), { recursive: true });
+  const seedRoot = env.HOME || '';
+  const seeds = [
+    [join(seedRoot, '.claude', 'settings.json'), join(home, '.claude', 'settings.json')],
+    [join(seedRoot, '.claude.json'), join(home, '.claude.json')],
+  ];
+  for (const [src, dst] of seeds) {
+    if (existsSync(src) && !existsSync(dst)) {
+      try { copyFileSync(src, dst); } catch { /* 读不到就算了 */ }
+    }
+  }
+  return home;
+}
 function runClaude(repo, prompt, { resume = null, onProgress = () => {}, timeoutMs = 20 * 60_000, workerId = '' } = {}) {
   return new Promise((resolve) => {
+    const home = jobHome(workerId, repo);
     // 容器内显式 IS_SANDBOX 才全 bypass；裸机默认白名单+acceptEdits（改不崩、跑不崩）
     const fullBypass = sandboxed && env.WORKER_FULL_BYPASS === '1';
     const args = ['-p', prompt, '--output-format', 'stream-json', '--verbose', '--append-system-prompt', WORKER_RULES];
@@ -97,13 +115,13 @@ function runClaude(repo, prompt, { resume = null, onProgress = () => {}, timeout
       execArgs = buildSandboxArgs({
         unit: unitName(`agent-${NODE_ID}`, workerId || Date.now().toString(36)),
         workdir: repo,
-        home: join(repo, '.home'),
+        home,
         command: CLAUDE_BIN,
         args,
       });
       file = 'systemd-run';
     }
-    const child = spawn(file, execArgs, { cwd: repo, env: ccEnv, stdio: ['ignore', 'pipe', 'pipe'] });
+    const child = spawn(file, execArgs, { cwd: repo, env: { ...ccEnv, HOME: home }, stdio: ['ignore', 'pipe', 'pipe'] });
     let buf = '', lastEmit = 0, finalText = '', sessionId = resume, errored = null, done = false;
     const timer = setTimeout(() => { child.kill('SIGTERM'); errored = 'cc 超时被终止'; }, timeoutMs);
     const finish = (ok) => { if (done) return; done = true; clearTimeout(timer); resolve({ ok, summary: (finalText || errored || '').slice(0, 4000), sessionId }); };

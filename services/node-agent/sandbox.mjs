@@ -39,6 +39,7 @@ export function buildSandboxArgs({ unit, workdir, home, command, args = [], limi
     '-p', 'ProtectSystem=strict',
     '-p', 'ProtectHome=yes',
     '-p', `ReadWritePaths=${workdir}`,
+    ...(home && home !== workdir ? ['-p', `ReadWritePaths=${home}`] : []),
     '-p', 'TemporaryFileSystem=/tmp:size=1G,mode=1777',
     '-p', 'PrivateIPC=yes',
     '-p', 'PrivateDevices=yes',
