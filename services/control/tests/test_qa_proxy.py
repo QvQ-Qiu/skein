@@ -76,6 +76,9 @@ def make_app(tmp_path, sso=False, internal=True):
         qa_chat_upstream="http://chat.test",
         qa_ops_upstream="http://ops.test",
         qa_client=client,
+        qa_panel_secret="panel-secret-123456",
+        qa_panel_sub="sub-1",
+        qa_panel_email="ops@example.com",
         **kwargs,
     )
     return app, conn, client
@@ -115,7 +118,9 @@ def test_ops_requires_token_or_internal(tmp_path):
         assert client.get("/ops/metrics").status_code == 401
         ok = client.get("/ops/metrics", headers={"X-Skein-Token": TOKEN})
     assert ok.status_code == 200
-    assert upstream.requests[-1]["url"] == "http://ops.test/ops/metrics"
+    sent = upstream.requests[-1]
+    assert sent["url"] == "http://ops.test/ops/metrics"
+    assert sent["headers"]["cookie"].startswith("ops_session=sub-1||ops@example.com|")
     conn.close()
 
 

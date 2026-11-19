@@ -10,6 +10,9 @@
 
 from __future__ import annotations
 
+import hashlib
+import hmac
+import time
 from collections.abc import AsyncIterator
 
 import httpx
@@ -36,9 +39,17 @@ class QAProxy:
         chat_upstream: str = "",
         ops_upstream: str = "",
         client: httpx.AsyncClient | None = None,
+        panel_secret: str = "",
+        panel_sub: str = "",
+        panel_email: str = "skein@ssemarket.cn",
+        panel_ttl: int = 3600,
     ) -> None:
         self.chat_upstream = chat_upstream.rstrip("/")
         self.ops_upstream = ops_upstream.rstrip("/")
+        self._panel_secret = panel_secret
+        self._panel_sub = panel_sub
+        self._panel_email = panel_email
+        self._panel_ttl = panel_ttl
         self._client = client or httpx.AsyncClient(
             timeout=httpx.Timeout(connect=5.0, read=None, write=30.0, pool=5.0),
             follow_redirects=False,
@@ -52,6 +63,17 @@ class QAProxy:
     def enabled_ops(self) -> bool:
         return bool(self.ops_upstream)
 
+    def _panel_cookie(self) -> str:
+        """给 ops 上游签一个面板会话：ops_session=sub|uid|email|exp.HMAC。"""
+        if not (self._panel_secret and self._panel_sub):
+            return ""
+        exp = int(time.time()) + self._panel_ttl
+        payload = f"{self._panel_sub}||{self._panel_email}|{exp}"
+        sig = hmac.new(
+            self._panel_secret.encode(), payload.encode(), hashlib.sha256
+        ).hexdigest()
+        return f"ops_session={payload}|{sig}"
+
     async def forward(self, request: Request, upstream: str, path: str) -> StreamingResponse:
         url = f"{upstream}/{path.lstrip('/')}"
         if request.url.query:
@@ -61,6 +83,10 @@ class QAProxy:
             for key, value in request.headers.items()
             if key.lower() not in HOP_HEADERS and key.lower() != "cookie"
         }
+        if upstream == self.ops_upstream:
+            panel = self._panel_cookie()
+            if panel:
+                headers["cookie"] = panel
         body = await request.body()
         outgoing = self._client.build_request(
             request.method, url, headers=headers, content=body or None

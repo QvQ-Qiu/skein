@@ -47,6 +47,9 @@ def build() -> tuple:
         sso_config=sso,
         qa_chat_upstream=cfg.qa_chat_upstream,
         qa_ops_upstream=cfg.qa_ops_upstream,
+        qa_panel_secret=cfg.ops_panel_secret,
+        qa_panel_sub=cfg.ops_panel_sub,
+        qa_panel_email=cfg.ops_panel_email,
     )
     return app, cfg, conn
 

@@ -140,6 +140,9 @@ def create_app(
     qa_chat_upstream: str = "",
     qa_ops_upstream: str = "",
     qa_client: Any | None = None,
+    qa_panel_secret: str = "",
+    qa_panel_sub: str = "",
+    qa_panel_email: str = "skein@ssemarket.cn",
 ) -> FastAPI:
     app = FastAPI(title="skein-control", version="0.1.0")
     sessions = SessionStore(conn, blob_root)
@@ -152,7 +155,14 @@ def create_app(
         if sso_client is None:
             sso_client = SsoClient(sso_config)
         sso_auth = SsoAuth(sso_client, sso_config)
-    qa = QAProxy(qa_chat_upstream, qa_ops_upstream, qa_client)
+    qa = QAProxy(
+        qa_chat_upstream,
+        qa_ops_upstream,
+        qa_client,
+        panel_secret=qa_panel_secret,
+        panel_sub=qa_panel_sub,
+        panel_email=qa_panel_email,
+    )
     login_attempts: dict[str, deque[float]] = defaultdict(deque)
 
     async def auth(
