@@ -116,6 +116,10 @@ systemctl restart skein-control
 `SKEIN_DAILY_TICKET_HOUR=9` 每天 9 点建「每日巡检」，`SKEIN_TICKET_DAILY_CAP=5` 是每日上限。
 暂停回路：`systemctl stop skein-watchdog` 或把 `SKEIN_WATCHDOG_TICKETS=0`。
 
+定时作业（原秋坞 CronJob）由控制面 driver 执行：`SKEIN_DRIVER=1` +
+`SKEIN_JOBS_FILE=/etc/skein/jobs.json`（`{"schedules":[{"job","cron"}],"commands":{...}}`），
+作业体在 `/srv/skein-jobs/`，迁移与回滚见 [migration-qiudock.md](migration-qiudock.md)。
+
 ### UniSSO（内接无感登录）
 
 `/etc/skein/env` 追加：
