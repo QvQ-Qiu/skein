@@ -35,6 +35,10 @@
 
 ### P1 定时作业（进行中）
 
+**进度（2026-11-19）**：包装脚本已上线 `/srv/skein-jobs`；post-curator `--dry-run --limit 3` 通过
+（候选 71、评审 3、零写入）；tech-digest `ingest --dry-run` 与 `star --dry-run` 运行中。
+下一步：`/etc/skein/jobs.json` 接入 driver，观察一次真跑后再 suspend qiudock CronJob。
+
 1. `deploy/jobs/` 两个包装脚本部署到 `/srv/skein-jobs`：本地镜像仓克隆、venv 依赖、flock 串行、直连网关。
 2. dry-run 验收：tech-digest `ingest --dry-run`（不落池）+ `daily --dry-run`（今日已发布会 skip，属正常）；post-curator `scan --dry-run --limit 3`。
 3. 调度切到 Skein：`SKEIN_DRIVER=1` + `SKEIN_SCHEDULES`（cron）+ `SKEIN_JOB_COMMANDS`，控制面重启后生效。
