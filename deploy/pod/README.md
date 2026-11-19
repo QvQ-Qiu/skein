@@ -28,7 +28,7 @@ NODE_ID=n-cloud-skein
 NODE_NAME=集市云-skein
 PLATFORMS=forum
 REPO_MAP={"forum":"/home/cloud/repos/skein"}
-MAX_WORKERS=2
+MAX_WORKERS=2                 # 并发上限（不是会话数；空闲会话不占进程）
 CLAUDE_BIN=/home/cloud/.local/node/bin/claude
 SKEIN_CONTROL_URL=https://skein.ssemarket.cn
 SKEIN_TOKEN=<同一个 SKEIN_TOKEN>
@@ -67,3 +67,9 @@ curl -s -H "X-Skein-Token: $SKEIN_TOKEN" http://127.0.0.1:7800/internal/nodes
 pod 内 `unshare -m` / `bwrap` 均 EPERM（看 §结论）。要更强隔离只有两个方向：
 让平台给 pod 配 `runtimeClassName=gvisor`，或者换一台能开 mount namespace 的机器。
 当前按「内部可信、pod 即边界」处理（见 `docs/worker-runtime.md` §4.1）。
+
+## 权限边界
+
+worker（cc）不继承控制面令牌：`SKEIN_TOKEN`、`AGENT_TOKEN`、`CONTROLLER_URL`、
+`SKEIN_CONTROL_URL` 在拉起时被剔除（`services/node-agent/worker-env.mjs`）。
+worker 只看得到工单、仓库与自己 HOME 下的 LLM 配置；不能调 `/internal/*`。

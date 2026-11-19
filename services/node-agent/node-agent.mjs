@@ -180,7 +180,8 @@ async function createWorker(msg) {
   const { worker_id, name, platform } = msg;
   // 节点自己知道仓库在哪：控制面不配 SKEIN_PLATFORM_REPOS 也能派。
   const repo = msg.repo || REPO_MAP[platform] || '';
-  if (Object.keys(state.workers).length >= MAX_WORKERS) { send({ t: 'worker.create_failed', worker_id, reason: '节点容量满' }); return; }
+  // 容量限制的是并发执行，不是历史会话数：空闲会话只占状态，不占进程。
+  if (busy.size >= MAX_WORKERS) { send({ t: 'worker.create_failed', worker_id, reason: '节点并发已满' }); return; }
   if (!repo || !existsSync(repo)) { send({ t: 'worker.create_failed', worker_id, reason: `仓库不存在 ${repo || '(未配置)'}` }); return; }
   let wt;
   try { wt = ensureWorktree(worker_id, repo); }
