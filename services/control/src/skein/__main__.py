@@ -55,10 +55,17 @@ def main() -> None:
     logging.getLogger("skein").info(
         "control plane started db=%s port=%s", cfg.db_path, cfg.port
     )
-    if cfg.driver_enabled and cfg.schedules:
-        schedules = parse_schedules(cfg.schedules)
+    schedules_raw = cfg.schedules
+    commands_raw = cfg.job_commands
+    if cfg.jobs_file and Path(cfg.jobs_file).is_file():
+        data = json.loads(Path(cfg.jobs_file).read_text(encoding="utf-8"))
+        schedules_raw = json.dumps(data.get("schedules") or [])
+        commands_raw = json.dumps(data.get("commands") or {})
+        logging.getLogger("skein").info("作业配置来自 %s", cfg.jobs_file)
+    if cfg.driver_enabled and schedules_raw:
+        schedules = parse_schedules(schedules_raw)
         try:
-            commands = json.loads(cfg.job_commands or "{}")
+            commands = json.loads(commands_raw or "{}")
         except json.JSONDecodeError:
             commands = {}
         if schedules:

@@ -13,6 +13,7 @@
 
 4. [deployment.md](deployment.md) —— venv、env、systemd、数据迁移、切换与回滚
 5. [migration.md](migration.md) —— 十步迁移路线与服务器工作树布局
+6. [migration-qiudock.md](migration-qiudock.md) —— 秋坞功能迁入 Skein、面板与秋坞下架的阶段与回滚
 
 ## 要接集市云
 
