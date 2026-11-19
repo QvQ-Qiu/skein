@@ -171,9 +171,11 @@ for (const [wid, w] of Object.entries(state.workers)) {
 saveState();
 
 async function createWorker(msg) {
-  const { worker_id, name, platform, repo } = msg;
+  const { worker_id, name, platform } = msg;
+  // 节点自己知道仓库在哪：控制面不配 SKEIN_PLATFORM_REPOS 也能派。
+  const repo = msg.repo || REPO_MAP[platform] || '';
   if (Object.keys(state.workers).length >= MAX_WORKERS) { send({ t: 'worker.create_failed', worker_id, reason: '节点容量满' }); return; }
-  if (!existsSync(repo)) { send({ t: 'worker.create_failed', worker_id, reason: `仓库不存在 ${repo}` }); return; }
+  if (!repo || !existsSync(repo)) { send({ t: 'worker.create_failed', worker_id, reason: `仓库不存在 ${repo || '(未配置)'}` }); return; }
   let wt;
   try { wt = ensureWorktree(worker_id, repo); }
   catch (e) { send({ t: 'worker.create_failed', worker_id, reason: 'worktree 创建失败：' + e.message }); return; }
