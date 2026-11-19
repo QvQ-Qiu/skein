@@ -6,15 +6,21 @@ payload 与 detail 能解析成 JSON 就解析，失败则保留原字符串。�
 
 from __future__ import annotations
 
+import asyncio
+import hashlib
 import json
 import sqlite3
+import time
+from collections.abc import AsyncIterator, Awaitable, Callable
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi.responses import StreamingResponse
 
-from skein import logbuf
+from skein import logbuf, watchdog
 from skein.admission import load_policies, save_policies
 from skein.session_store import blob_path
+from skein.summary import summary as build_summary
 
 _TICKET_FIELDS = (
     "id",
@@ -222,6 +228,129 @@ def _turn_text(root: Path, sha256: str) -> str | None:
     return data.decode("utf-8", errors="replace")
 
 
+_TICKET_LIST_FIELDS = ("id", "code", "title", "status", "thread_id", "updated_at")
+
+_STREAM_INTERVAL = 2.0
+_STREAM_PING = 15.0
+_STREAM_TICKETS = 100
+_STREAM_EVENTS = 20
+
+
+def ticket_rows(
+    conn: sqlite3.Connection, *, status: str | None = None, limit: int = 100
+) -> list[dict]:
+    sql = "SELECT id, code, title, status, thread_id, updated_at FROM tickets"
+    params: list[object] = []
+    if status:
+        sql += " WHERE status = ?"
+        params.append(status)
+    sql += " ORDER BY updated_at DESC LIMIT ?"
+    params.append(_nonneg(limit))
+    return _rows(conn, sql, tuple(params), _TICKET_LIST_FIELDS)
+
+
+def _topology_view(conn: sqlite3.Connection) -> dict:
+    nodes = _rows(
+        conn,
+        "SELECT id, name, host, platforms, status, max_workers, last_seen"
+        " FROM nodes ORDER BY id",
+        (),
+        _NODE_FIELDS,
+    )
+    tickets = _rows(
+        conn,
+        "SELECT id, code, thread_id, title, status, dedup_key, created_at, updated_at"
+        " FROM tickets ORDER BY updated_at DESC, id DESC LIMIT ?",
+        (_TOPOLOGY_TICKETS,),
+        _TICKET_FIELDS,
+    )
+    dispatches = _rows(
+        conn,
+        "SELECT id, ticket_id, node_id, worker_id, state, attempt, detail, updated_at"
+        " FROM dispatches ORDER BY updated_at DESC, id DESC LIMIT ?",
+        (_TOPOLOGY_DISPATCHES,),
+        _DISPATCH_FIELDS,
+        _JSON_DETAIL,
+    )
+    subscriptions = _rows(
+        conn,
+        "SELECT thread_id, ticket_id, state, created_at FROM subscriptions"
+        " ORDER BY created_at, thread_id, ticket_id",
+        (),
+        _SUB_FIELDS,
+    )
+    return {
+        "nodes": nodes,
+        "tickets": tickets,
+        "dispatches": dispatches,
+        "sessions": _sessions(conn, limit=_TOPOLOGY_SESSIONS),
+        "subscriptions": subscriptions,
+    }
+
+
+def snapshot(conn: sqlite3.Connection) -> dict:
+    """控制台首屏要的全部数据，一次读齐。"""
+    return {
+        "summary": build_summary(conn),
+        "signals": watchdog.signals(conn),
+        "tickets": ticket_rows(conn, limit=_STREAM_TICKETS),
+        "topology": _topology_view(conn),
+        "events": _events(conn, limit=_STREAM_EVENTS),
+    }
+
+
+def _digest_source(snap: dict) -> str:
+    # age_s 每个 tick 都在涨，它由已有时间戳推得，不该触发推送。
+    stable = dict(snap)
+    stable["signals"] = [
+        {key: value for key, value in item.items() if key != "age_s"}
+        for item in snap.get("signals", [])
+    ]
+    return json.dumps(stable, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+
+
+class StreamState:
+    """把快照压成 SSE 帧：内容变了发 snapshot，否则按间隔发 ping。"""
+
+    def __init__(
+        self, interval: float = _STREAM_INTERVAL, ping_after: float = _STREAM_PING
+    ) -> None:
+        self.interval = interval
+        self.ping_after = ping_after
+        self.digest = ""
+        self.last_sent = 0.0
+
+    def frame(self, snap: dict, now: float) -> str:
+        body = json.dumps(snap, ensure_ascii=False, separators=(",", ":"))
+        digest = hashlib.sha256(_digest_source(snap).encode()).hexdigest()
+        if digest != self.digest:
+            self.digest = digest
+            self.last_sent = now
+            return f"event: snapshot\ndata: {body}\n\n"
+        if now - self.last_sent >= self.ping_after:
+            self.last_sent = now
+            return f"event: ping\ndata: {int(now)}\n\n"
+        return ""
+
+
+async def stream_frames(
+    conn: sqlite3.Connection,
+    *,
+    is_disconnected: Callable[[], Awaitable[bool]] | None = None,
+    interval: float = _STREAM_INTERVAL,
+) -> AsyncIterator[str]:
+    state = StreamState(interval=interval)
+    yield "retry: 3000\n\n"
+    while True:
+        if is_disconnected is not None and await is_disconnected():
+            return
+        snap = await asyncio.to_thread(snapshot, conn)
+        frame = state.frame(snap, time.time())
+        if frame:
+            yield frame
+        await asyncio.sleep(state.interval)
+
+
 def create_ui_router(conn: sqlite3.Connection, blob_root: str | Path, auth) -> APIRouter:
     """挂上与控制面相同的 auth 依赖。调用方负责 include_router。"""
     router = APIRouter(dependencies=[Depends(auth)])
@@ -343,42 +472,19 @@ def create_ui_router(conn: sqlite3.Connection, blob_root: str | Path, auth) -> A
 
     @router.get("/internal/topology")
     def topology() -> dict:
-        nodes = _rows(
-            conn,
-            "SELECT id, name, host, platforms, status, max_workers, last_seen"
-            " FROM nodes ORDER BY id",
-            (),
-            _NODE_FIELDS,
+        return _topology_view(conn)
+
+    @router.get("/internal/stream")
+    async def stream(request: Request) -> StreamingResponse:
+        """控制台实时快照：数据变了才推，没变就按时发心跳。"""
+        return StreamingResponse(
+            stream_frames(conn, is_disconnected=request.is_disconnected),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache, no-transform",
+                "X-Accel-Buffering": "no",
+            },
         )
-        tickets = _rows(
-            conn,
-            "SELECT id, code, thread_id, title, status, dedup_key, created_at, updated_at"
-            " FROM tickets ORDER BY updated_at DESC, id DESC LIMIT ?",
-            (_TOPOLOGY_TICKETS,),
-            _TICKET_FIELDS,
-        )
-        dispatches = _rows(
-            conn,
-            "SELECT id, ticket_id, node_id, worker_id, state, attempt, detail, updated_at"
-            " FROM dispatches ORDER BY updated_at DESC, id DESC LIMIT ?",
-            (_TOPOLOGY_DISPATCHES,),
-            _DISPATCH_FIELDS,
-            _JSON_DETAIL,
-        )
-        subscriptions = _rows(
-            conn,
-            "SELECT thread_id, ticket_id, state, created_at FROM subscriptions"
-            " ORDER BY created_at, thread_id, ticket_id",
-            (),
-            _SUB_FIELDS,
-        )
-        return {
-            "nodes": nodes,
-            "tickets": tickets,
-            "dispatches": dispatches,
-            "sessions": _sessions(conn, limit=_TOPOLOGY_SESSIONS),
-            "subscriptions": subscriptions,
-        }
 
     @router.get("/internal/audit")
     def list_audit(limit: int = 100) -> dict:

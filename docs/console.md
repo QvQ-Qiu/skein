@@ -56,7 +56,16 @@ Vue 应用已经接管 `/console/`，静态页保留为 `/console-legacy/` 兜�
 
 - **阵眼**的每个数字都能点回列表；雷达上的每个点对应一个真实对象，不画没有数据的装饰。
 - **流水线**六段都是真实计数，点某一段就进到那一段的列表。
-- 数据来自 `/internal/summary`、`/internal/topology`、`/internal/tickets`、`/internal/signals`、`/internal/events`，每 15 秒刷新。
+- 数据来自 `/internal/stream` 推送的快照；断流时自动回落为 15 秒轮询，重连后立刻补一帧。
+
+### 实时推送
+
+`GET /internal/stream` 每 2 秒算一次快照（summary / signals / `tickets` / topology / 最近 20 条事件），和上一帧比对：变了发 `event: snapshot`，没变就每 15 秒发一次 `event: ping`。
+
+- 客户端用 `fetch` 读流，不用 `EventSource`——后者无法带 `X-Skein-Token` 头。
+- 断线按 1s → 2s → … → 15s 退避重连；401 直接清掉连接回到落地页。
+- 顶栏的状态就是这条连接：连上显示「实时」，断开显示「轮询」。
+- 每次连接都会先收到一帧完整快照，所以刷新页面不依赖 REST 首屏。
 
 ## 三、技术选型
 
@@ -82,11 +91,11 @@ Vue 应用已经接管 `/console/`，静态页保留为 `/console-legacy/` 兜�
 
 | 需要 | 现状 | 要加的 |
 | --- | --- | --- |
-| 实时推送 | 工作台 15 秒轮询 | SSE `/internal/stream`（summary + signals 事件） |
 | 成本 | 无 | 网关侧按 run 汇总，或在 `summary` 里加 |
 | 鉴权 | `localStorage` 令牌 | OAuth 会话，与论坛身份一致 |
 | 力导网 | 自绘力导 | 换 AntV G6（dagre / combo / minimap），保留 `MeshGraph` 的数据装配层 |
 | 工作台队列分页 | 只取前 100 张单 | 服务端按状态分页，队列懒加载 |
+| 多连接开销 | 每个连接每 2 秒各算一次快照 | 连接多了再加进程内共享帧缓存 |
 
 ## 五、构建与部署
 

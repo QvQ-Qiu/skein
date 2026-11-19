@@ -224,6 +224,42 @@ async function checkDetail(id) {
   return report("PASS", "工单详情");
 }
 
+async function checkStream() {
+  const name = "实时推送";
+  const root = origin();
+  if (root.error) return report("FAIL", name, root.error);
+  if (!token) return report("FAIL", name, "未设置 SKEIN_TOKEN");
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
+  try {
+    const res = await fetch(new URL("/internal/stream", `${root.href}/`), {
+      headers: { "X-Skein-Token": token },
+      signal: controller.signal,
+    });
+    if (res.status !== 200) return report("FAIL", name, `HTTP ${res.status}`);
+    if (!(res.headers.get("content-type") || "").includes("text/event-stream")) {
+      return report("FAIL", name, "content-type 不是 text/event-stream");
+    }
+    const reader = res.body?.getReader();
+    if (!reader) return report("FAIL", name, "响应没有可读流");
+    const decoder = new TextDecoder();
+    let buffer = "";
+    while (!buffer.includes("event: snapshot") && buffer.length < 65536) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+    }
+    await reader.cancel();
+    if (!buffer.includes("event: snapshot")) return report("FAIL", name, "未收到首帧 snapshot");
+    return report("PASS", name);
+  } catch (err) {
+    return report("FAIL", name, netError(err));
+  } finally {
+    clearTimeout(timer);
+    controller.abort();
+  }
+}
+
 try {
   if (origin().error) {
     report("FAIL", "SKEIN_BASE", origin().error);
@@ -239,6 +275,7 @@ try {
       ["id", "code", "status"],
     );
     await checkCollection("信号列表", "/internal/signals", "signals", ["kind", "id"]);
+    await checkStream();
     if (tickets?.length) await checkDetail(tickets[0].id);
   }
   finish();

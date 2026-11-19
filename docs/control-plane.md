@@ -71,6 +71,7 @@ make run-poll    # 采集循环
 | POST | `/internal/worker/turn` | 有 | transcript 上传（base64） |
 | POST | `/internal/outbox/emit` | 有 | 对外写，单次 |
 | GET | `/internal/summary` | 有 | 计数概览 |
+| GET | `/internal/stream` | 有 | SSE 实时快照：数据变了才推，静默时 15s 一次心跳 |
 | POST | `/internal/tickets/{id}/dispatch` | 有 | 派给在线节点 |
 | POST | `/internal/tickets/{id}/review` | 有 | approve / reject |
 | POST | `/internal/runs` | 有 | 开一次作业运行（按 job+day 去重） |

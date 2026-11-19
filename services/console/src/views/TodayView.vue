@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import {
   fetchEvents,
   fetchSignals,
@@ -17,6 +17,9 @@ import EmptyState from "../components/EmptyState.vue";
 import ErrorBar from "../components/ErrorBar.vue";
 import FlowRibbon, { type FlowStage } from "../components/FlowRibbon.vue";
 import PulseDeck from "../components/PulseDeck.vue";
+import { useLiveStore, type Snapshot } from "../live";
+
+const live = useLiveStore();
 
 const summary = ref<Summary | null>(null);
 const topology = ref<Topology | null>(null);
@@ -206,6 +209,23 @@ async function load() {
   loading.value = false;
 }
 
+function applySnapshot(snap: Snapshot) {
+  summary.value = snap.summary;
+  topology.value = snap.topology;
+  signals.value = snap.signals;
+  tickets.value = snap.tickets;
+  events.value = snap.events;
+  loading.value = false;
+  error.value = null;
+}
+
+watch(
+  () => live.snapshot,
+  (snap) => {
+    if (snap) applySnapshot(snap);
+  },
+);
+
 async function decide(ticket: Ticket, decision: "approve" | "reject") {
   if (acting.value) return;
   if (decision === "reject" && !window.confirm(`确认驳回 ${ticket.code}？状态将变为已驳回。`)) {
@@ -226,9 +246,10 @@ async function decide(ticket: Ticket, decision: "approve" | "reject") {
 }
 
 onMounted(() => {
+  if (live.snapshot) applySnapshot(live.snapshot);
   void load();
   timer = window.setInterval(() => {
-    void load();
+    if (live.state !== "open") void load();
   }, 15000);
 });
 
@@ -246,6 +267,7 @@ onBeforeUnmount(() => {
         <p class="muted">现在有什么要我处理 · 谁在干什么 · 卡在哪</p>
       </div>
       <div class="today__meta">
+        <span v-if="live.state === 'open'" class="live-tag">实时</span>
         <span class="muted mono">{{ sessionCount }} 会话</span>
         <button type="button" class="ghost" :disabled="loading" @click="load">
           {{ loading ? "刷新中" : "刷新" }}
@@ -401,6 +423,15 @@ onBeforeUnmount(() => {
   gap: 14px;
   font-size: 11px;
   letter-spacing: 0.1em;
+}
+
+.live-tag {
+  padding: 1px 7px;
+  border: 1px solid var(--ok);
+  color: var(--ok);
+  font-size: 10px;
+  letter-spacing: 0.16em;
+  text-shadow: 0 0 8px rgba(87, 217, 163, 0.5);
 }
 
 .ghost {

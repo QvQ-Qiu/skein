@@ -1,10 +1,13 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref } from "vue";
+import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import { fetchSummary, fetchTopology, type Summary, type Topology } from "../api";
 import ErrorBar from "../components/ErrorBar.vue";
 import TopologyBoard from "../components/TopologyBoard.vue";
+import { useLiveStore, type Snapshot } from "../live";
 
 const POLL_MS = 10000;
+
+const live = useLiveStore();
 
 const summary = ref<Summary | null>(null);
 const topology = ref<Topology | null>(null);
@@ -60,10 +63,25 @@ async function load() {
   }
 }
 
+function applySnapshot(snap: Snapshot) {
+  summary.value = snap.summary;
+  topology.value = snap.topology;
+  loading.value = false;
+  error.value = null;
+}
+
+watch(
+  () => live.snapshot,
+  (snap) => {
+    if (snap) applySnapshot(snap);
+  },
+);
+
 onMounted(() => {
+  if (live.snapshot) applySnapshot(live.snapshot);
   void load();
   timer = window.setInterval(() => {
-    void load();
+    if (live.state !== "open") void load();
   }, POLL_MS);
 });
 
@@ -75,7 +93,10 @@ onUnmounted(() => {
 
 <template>
   <section class="page">
-    <h2 class="page__title">总览</h2>
+    <h2 class="page__title">
+      总览
+      <span v-if="live.state === 'open'" class="page__live">实时</span>
+    </h2>
     <ErrorBar v-if="error" :message="error" @retry="load()" />
     <p v-if="loading && !summary && !topology" class="muted load">加载中</p>
 
@@ -122,6 +143,16 @@ onUnmounted(() => {
 
 .load {
   margin: 0 0 10px;
+}
+
+.page__live {
+  margin-left: 8px;
+  padding: 1px 6px;
+  border: 1px solid var(--ok);
+  color: var(--ok);
+  font-size: 10px;
+  letter-spacing: 0.16em;
+  vertical-align: 2px;
 }
 
 .metrics {

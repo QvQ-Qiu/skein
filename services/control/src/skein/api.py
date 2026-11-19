@@ -23,7 +23,7 @@ from skein.host import RouterHost
 from skein.outbox import EffectState, EmitResult, Outbox, get
 from skein.session_store import SessionStore, TurnConflict
 from skein.summary import summary as build_summary
-from skein.ui_api import create_ui_router
+from skein.ui_api import create_ui_router, ticket_rows
 
 
 class ChatIn(BaseModel):
@@ -153,27 +153,7 @@ def create_app(
 
     @app.get("/internal/tickets", dependencies=[Depends(auth)])
     def list_tickets(status: str | None = None, limit: int = 100) -> dict:
-        sql = "SELECT id, code, title, status, thread_id, updated_at FROM tickets"
-        params: list[object] = []
-        if status:
-            sql += " WHERE status = ?"
-            params.append(status)
-        sql += " ORDER BY updated_at DESC LIMIT ?"
-        params.append(limit)
-        rows = conn.execute(sql, tuple(params)).fetchall()
-        return {
-            "tickets": [
-                {
-                    "id": r["id"],
-                    "code": r["code"],
-                    "title": r["title"],
-                    "status": r["status"],
-                    "thread_id": r["thread_id"],
-                    "updated_at": r["updated_at"],
-                }
-                for r in rows
-            ]
-        }
+        return {"tickets": ticket_rows(conn, status=status, limit=limit)}
 
     @app.get("/internal/nodes", dependencies=[Depends(auth)])
     def list_nodes() -> dict:

@@ -7,12 +7,18 @@ const props = withDefaults(defineProps<{ value: number; duration?: number }>(), 
 
 const shown = ref(props.value);
 let raf = 0;
+let settle = 0;
 
 watch(
   () => props.value,
   (to, from) => {
     cancelAnimationFrame(raf);
-    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+    window.clearTimeout(settle);
+    // 后台标签页不跑 rAF，直接跳到目标值，避免停在上一个数字。
+    if (
+      document.hidden ||
+      window.matchMedia("(prefers-reduced-motion: reduce)").matches
+    ) {
       shown.value = to;
       return;
     }
@@ -24,10 +30,17 @@ watch(
       if (progress < 1) raf = requestAnimationFrame(step);
     };
     raf = requestAnimationFrame(step);
+    // 窗口被遮挡时 rAF 会被节流；兜底到点就落值。
+    settle = window.setTimeout(() => {
+      shown.value = to;
+    }, props.duration + 250);
   },
 );
 
-onBeforeUnmount(() => cancelAnimationFrame(raf));
+onBeforeUnmount(() => {
+  cancelAnimationFrame(raf);
+  window.clearTimeout(settle);
+});
 </script>
 
 <template>

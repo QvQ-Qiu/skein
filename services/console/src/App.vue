@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from "vue";
+import { computed, onMounted, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import {
   darkTheme,
@@ -15,9 +15,11 @@ import {
 } from "naive-ui";
 import ErrorBar from "./components/ErrorBar.vue";
 import SkyCanvas from "./components/SkyCanvas.vue";
+import { useLiveStore } from "./live";
 import { useConsoleStore } from "./store";
 
 const store = useConsoleStore();
+const live = useLiveStore();
 const route = useRoute();
 const router = useRouter();
 const tokenDraft = ref(store.token);
@@ -176,6 +178,22 @@ const booting = computed(
 
 const landing = computed(() => !store.connected && !booting.value);
 
+const feedLabel = computed(() => {
+  if (!store.connected) return "未连接";
+  if (live.state === "open") return "实时";
+  if (live.state === "connecting") return "连接中";
+  return "轮询";
+});
+
+watch(
+  () => store.connected,
+  (connected) => {
+    if (connected) live.start();
+    else live.stop();
+  },
+  { immediate: true },
+);
+
 // 401 会把 store.error 清掉，拒绝原因要在落地上单独说清楚。
 const gateMessage = computed(() => {
   if (store.connected) return "";
@@ -309,9 +327,9 @@ onMounted(() => {
               </button>
             </nav>
             <div class="topbar__meta">
-              <div class="conn" :class="{ live: store.connected }">
+              <div class="conn" :class="{ live: store.connected, push: live.state === 'open' }">
                 <span class="conn__dot" aria-hidden="true"></span>
-                <span>{{ store.connected ? "LIVE" : "未连接" }}</span>
+                <span>{{ feedLabel }}</span>
               </div>
               <div class="topbar__clock">
                 <span>最近刷新</span>

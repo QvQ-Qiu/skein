@@ -540,6 +540,17 @@ input {
   animation: connect-in 0.45s ease;
 }
 
+.conn.push .conn__dot {
+  animation: connect-in 0.45s ease, feed-pulse 1.9s ease-in-out 0.45s infinite;
+}
+
+@keyframes feed-pulse {
+  50% {
+    opacity: 0.45;
+    box-shadow: 0 0 3px var(--ok);
+  }
+}
+
 .topbar__clock {
   flex: 0 0 auto;
   display: flex;
