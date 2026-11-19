@@ -45,6 +45,8 @@ def build() -> tuple:
         internal_token=cfg.forum_token,
         platform_repos=cfg.platform_repos,
         sso_config=sso,
+        qa_chat_upstream=cfg.qa_chat_upstream,
+        qa_ops_upstream=cfg.qa_ops_upstream,
     )
     return app, cfg, conn
 

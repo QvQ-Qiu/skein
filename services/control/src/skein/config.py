@@ -50,6 +50,8 @@ class Config:
     sso_client_secret: str = ""
     # None=按 unisso 响应种；""=host-only；其他值=显式域
     sso_cookie_domain: str | None = None
+    qa_chat_upstream: str = ""
+    qa_ops_upstream: str = ""
 
     @classmethod
     def from_env(cls, env: dict[str, str] | None = None) -> Config:
@@ -121,6 +123,8 @@ class Config:
             sso_cookie_domain=cls._cookie_domain(
                 source.get("SKEIN_COOKIE_DOMAIN", base.sso_cookie_domain)
             ),
+            qa_chat_upstream=source.get("SKEIN_QA_CHAT_UPSTREAM", base.qa_chat_upstream),
+            qa_ops_upstream=source.get("SKEIN_QA_OPS_UPSTREAM", base.qa_ops_upstream),
         )
 
     @staticmethod

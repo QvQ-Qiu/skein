@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Request, WebSocket
-from fastapi.responses import JSONResponse, RedirectResponse
+from fastapi.responses import JSONResponse, RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
@@ -24,6 +24,7 @@ from skein.channel import ChannelHub
 from skein.compat import ForumCompatWriter
 from skein.host import RouterHost
 from skein.outbox import EffectState, EmitResult, Outbox, get
+from skein.qa_proxy import QAProxy
 from skein.session_store import SessionStore, TurnConflict
 from skein.sso import (
     COOKIE_NAMES,
@@ -103,6 +104,9 @@ class LoginIn(BaseModel):
     password: str
 
 
+QA_METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"]
+
+
 class TriggerIn(BaseModel):
     source: str
     origin_id: str
@@ -133,6 +137,9 @@ def create_app(
     internal_token: str = "",
     sso_config: SsoConfig | None = None,
     sso_client: Any | None = None,
+    qa_chat_upstream: str = "",
+    qa_ops_upstream: str = "",
+    qa_client: Any | None = None,
 ) -> FastAPI:
     app = FastAPI(title="skein-control", version="0.1.0")
     sessions = SessionStore(conn, blob_root)
@@ -145,6 +152,7 @@ def create_app(
         if sso_client is None:
             sso_client = SsoClient(sso_config)
         sso_auth = SsoAuth(sso_client, sso_config)
+    qa = QAProxy(qa_chat_upstream, qa_ops_upstream, qa_client)
     login_attempts: dict[str, deque[float]] = defaultdict(deque)
 
     async def auth(
@@ -249,6 +257,44 @@ def create_app(
         for name in COOKIE_NAMES:
             response.delete_cookie(key=name, domain=domain, path="/")
         return response
+
+    async def internal_only(
+        request: Request, x_skein_token: str = Header(default="")
+    ) -> None:
+        # ops 面只放内部身份：服务令牌，或 SSO 会话且 internal=1。
+        if token and x_skein_token == token:
+            return
+        if sso_auth is None:
+            raise HTTPException(status_code=401, detail="unauthorized")
+        try:
+            principal = await asyncio.to_thread(sso_auth.verify, request.cookies)
+        except SsoRejected as error:
+            raise HTTPException(status_code=error.status, detail=error.code)
+        except SsoUnavailable:
+            raise HTTPException(status_code=503, detail="sso_unavailable")
+        if not principal.internal:
+            raise HTTPException(status_code=403, detail="not_internal")
+
+    @app.api_route("/api/v1/agent/{path:path}", methods=QA_METHODS)
+    async def qa_chat_agent(path: str, request: Request) -> StreamingResponse:
+        """小秋 chat 面：用户 JWT 原样透传，用户级鉴权在上游；Cookie 不转发。"""
+        if not qa.enabled_chat:
+            raise HTTPException(status_code=503, detail="qa_not_configured")
+        return await qa.forward(request, qa.chat_upstream, f"api/v1/agent/{path}")
+
+    @app.api_route("/task/{path:path}", methods=QA_METHODS)
+    async def qa_chat_task(path: str, request: Request) -> StreamingResponse:
+        if not qa.enabled_chat:
+            raise HTTPException(status_code=503, detail="qa_not_configured")
+        return await qa.forward(request, qa.chat_upstream, f"task/{path}")
+
+    @app.api_route("/ops/{path:path}", methods=QA_METHODS)
+    async def qa_ops(path: str, request: Request) -> StreamingResponse:
+        """小秋 ops 面：只有内部身份能到；公网用户拿不到这条路径。"""
+        await internal_only(request, request.headers.get("x-skein-token", ""))
+        if not qa.enabled_ops:
+            raise HTTPException(status_code=503, detail="qa_not_configured")
+        return await qa.forward(request, qa.ops_upstream, f"ops/{path}")
 
     @app.get("/internal/summary", dependencies=[Depends(auth)])
     def internal_summary() -> dict:
