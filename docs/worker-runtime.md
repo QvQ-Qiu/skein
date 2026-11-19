@@ -282,6 +282,23 @@ pod 内没有 systemd，也没有 mount namespace 权限（`unshare -m` EPERM）
 - `WORKER_BIN=claude|pi`；pi 走 print/JSON 模式，输出规范化到现有 `{ok, summary, sessionId}` 契约。
 - 沙箱与调度不感知 harness；换模型/换工具不动控制面。
 
+### 4.5 自维护回路（P1 主线）
+
+```
+Watchdog（独立 systemd 进程，默认 300s 一轮）
+  ├─ 读确定性信号：派单超时 / 作业失败 / 写回失败 / 节点离线且有在途
+  ├─ 新信号 → POST /internal/tickets
+  │    dedup=auto:signal:<kind>:<id>，summary 带信号原文与「先定位根因」的要求
+  ├─ 可选直接派单（SKEIN_WATCHDOG_DISPATCH=1，平台 `skein`）
+  └─ 每天 SKEIN_DAILY_TICKET_HOUR 点 → 「每日巡检」工单
+       dedup=auto:daily:<YYYY-MM-DD>，全正常时只输出巡检结论、不建分支
+
+工雁在 pod 修 → 修复分支 → 人验收（硬闸）→ 合入
+```
+
+保护：每日自动建单上限（默认 5）、dedup 幂等（重启不重复建）、派单开关、
+永不自动合入/部署。平台自己（Skein）是第一个被维护对象；unisso/秋坞纳管后同理。
+
 ### 4.5 代码与部署的边界
 
 要「大 pod 改某个服务」，该服务先得是三件套：

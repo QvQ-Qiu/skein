@@ -125,7 +125,8 @@ class ChannelHub:
             self._conn, pending["dispatch_id"], state="created", worker_id=worker_id
         )
         ticket = self._conn.execute(
-            "SELECT id, code, title FROM tickets WHERE id = ?", (pending["ticket_id"],)
+            "SELECT id, code, title, summary FROM tickets WHERE id = ?",
+            (pending["ticket_id"],),
         ).fetchone()
         if ticket is None:
             return
@@ -138,6 +139,7 @@ class ChannelHub:
                     "id": ticket["id"],
                     "code": ticket["code"],
                     "title": ticket["title"],
+                    "summary": ticket["summary"] or "",
                     "platform": pending.get("platform") or "",
                     "kind": "bug",
                     "severity": "normal",

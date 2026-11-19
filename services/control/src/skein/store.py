@@ -73,14 +73,15 @@ def create_ticket(
     title: str,
     thread_id: str | None = None,
     dedup_key: str | None = None,
+    summary: str = "",
 ) -> str:
     ticket_id = db.new_id()
     code = "SK-" + ticket_id[:8].upper()
     t = time.time()
     conn.execute(
-        "INSERT INTO tickets (id, code, thread_id, title, status, dedup_key, created_at, updated_at)"
-        " VALUES (?, ?, ?, ?, 'staged', ?, ?, ?)",
-        (ticket_id, code, thread_id, title, dedup_key, t, t),
+        "INSERT INTO tickets (id, code, thread_id, title, summary, status, dedup_key, created_at, updated_at)"
+        " VALUES (?, ?, ?, ?, ?, 'staged', ?, ?, ?)",
+        (ticket_id, code, thread_id, title, summary, dedup_key, t, t),
     )
     return ticket_id
 

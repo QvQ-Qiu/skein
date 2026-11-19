@@ -12,7 +12,7 @@ import time
 import uuid
 from pathlib import Path
 
-SCHEMA_VERSION = 6
+SCHEMA_VERSION = 7
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS events (
@@ -39,6 +39,7 @@ CREATE TABLE IF NOT EXISTS tickets (
     code        TEXT NOT NULL,
     thread_id   TEXT,
     title       TEXT NOT NULL DEFAULT '',
+    summary     TEXT NOT NULL DEFAULT '',
     status      TEXT NOT NULL DEFAULT 'staged',
     dedup_key   TEXT,
     created_at  REAL NOT NULL,
@@ -195,9 +196,13 @@ def connect(path: str | Path) -> sqlite3.Connection:
 
 def migrate(conn: sqlite3.Connection) -> int:
     current = conn.execute("PRAGMA user_version").fetchone()[0]
+    conn.executescript(SCHEMA)
+    # 老库补列：executescript 的 IF NOT EXISTS 不会改已存在的表。
+    ticket_cols = {row[1] for row in conn.execute("PRAGMA table_info(tickets)")}
+    if "summary" not in ticket_cols:
+        conn.execute("ALTER TABLE tickets ADD COLUMN summary TEXT NOT NULL DEFAULT ''")
     if current >= SCHEMA_VERSION:
         return current
-    conn.executescript(SCHEMA)
     conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
     return SCHEMA_VERSION
 

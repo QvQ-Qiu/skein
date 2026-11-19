@@ -38,6 +38,14 @@ if [ -f "$SKEIN_ENV" ]; then cp "$SKEIN_ENV" "$SKEIN_ENV.bak-$TS"; fi
     grep -E '^UNISSO_CLIENT_ID=' /root/unisso-migration/clients/skein.env | sed 's/^UNISSO_CLIENT_ID=/SKEIN_SSO_CLIENT_ID=/'
     grep -E '^UNISSO_CLIENT_SECRET=' /root/unisso-migration/clients/skein.env | sed 's/^UNISSO_CLIENT_SECRET=/SKEIN_SSO_CLIENT_SECRET=/'
   fi
+  echo "SKEIN_HOST=172.17.0.1"
+  echo "SKEIN_CONTROL_URL=http://127.0.0.1:7800"
+  echo "SKEIN_WATCHDOG=1"
+  echo "SKEIN_WATCHDOG_TICKETS=1"
+  echo "SKEIN_WATCHDOG_DISPATCH=${SKEIN_WATCHDOG_DISPATCH:-1}"
+  echo "SKEIN_WATCHDOG_INTERVAL=300"
+  echo "SKEIN_DAILY_TICKET_HOUR=${SKEIN_DAILY_TICKET_HOUR:-9}"
+  echo "SKEIN_TICKET_DAILY_CAP=${SKEIN_TICKET_DAILY_CAP:-5}"
 } > "$SKEIN_ENV"
 chmod 600 "$SKEIN_ENV"
 grep -q '^SKEIN_SSO_CLIENT_ID=' "$SKEIN_ENV" && echo "  SSO 凭据已并入" || echo "  未发现 clients/skein.env，先按令牌模式跑（SSO 注册后再补）"
@@ -64,6 +72,29 @@ WantedBy=multi-user.target
 UNIT
 systemctl daemon-reload
 systemctl enable --now skein-control
+
+echo "== 3b/5 装 watchdog（自维护回路，独立进程） =="
+WUNIT=/etc/systemd/system/skein-watchdog.service
+if [ -f "$WUNIT" ]; then cp "$WUNIT" "$WUNIT.bak-$TS"; fi
+cat > "$WUNIT" <<WUNIT
+[Unit]
+Description=Skein watchdog (external control loop: tickets / daily review)
+After=network-online.target skein-control.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=$SKEIN_REPO/services/control
+EnvironmentFile=$SKEIN_ENV
+ExecStart=/usr/bin/env PYTHONPATH=$SKEIN_REPO/services/control/src python3 -m skein.watchdog_agent
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
+WUNIT
+systemctl daemon-reload
+systemctl enable --now skein-watchdog
 
 echo "== 4/5 自检 =="
 sleep 2

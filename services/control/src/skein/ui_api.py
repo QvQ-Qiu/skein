@@ -27,6 +27,7 @@ _TICKET_FIELDS = (
     "code",
     "thread_id",
     "title",
+    "summary",
     "status",
     "dedup_key",
     "created_at",
@@ -259,7 +260,7 @@ def _topology_view(conn: sqlite3.Connection) -> dict:
     )
     tickets = _rows(
         conn,
-        "SELECT id, code, thread_id, title, status, dedup_key, created_at, updated_at"
+        "SELECT id, code, thread_id, title, summary, status, dedup_key, created_at, updated_at"
         " FROM tickets ORDER BY updated_at DESC, id DESC LIMIT ?",
         (_TOPOLOGY_TICKETS,),
         _TICKET_FIELDS,
@@ -360,7 +361,7 @@ def create_ui_router(conn: sqlite3.Connection, blob_root: str | Path, auth) -> A
     def get_ticket(ticket_id: str) -> dict:
         ticket = _first(
             conn,
-            "SELECT id, code, thread_id, title, status, dedup_key, created_at, updated_at"
+            "SELECT id, code, thread_id, title, summary, status, dedup_key, created_at, updated_at"
             " FROM tickets WHERE id = ?",
             (ticket_id,),
             _TICKET_FIELDS,
@@ -428,7 +429,7 @@ def create_ui_router(conn: sqlite3.Connection, blob_root: str | Path, auth) -> A
             raise HTTPException(status_code=404, detail="thread not found")
         tickets = _rows(
             conn,
-            "SELECT id, code, thread_id, title, status, dedup_key, created_at, updated_at"
+            "SELECT id, code, thread_id, title, summary, status, dedup_key, created_at, updated_at"
             " FROM tickets WHERE thread_id = ? ORDER BY created_at ASC, id",
             (thread_id,),
             _TICKET_FIELDS,

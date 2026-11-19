@@ -76,6 +76,7 @@ make run-poll    # 采集循环
 | POST | `/api/session/login` | 无 | 邮箱+密码 → password/verify → 种共享 Cookie（每 IP 10 次/分） |
 | POST | `/api/session/logout` | 无 | session/revoke + 双名清 Cookie |
 | POST | `/internal/tickets/{id}/dispatch` | 有 | 派给在线节点 |
+| POST | `/internal/tickets` | 有 | 外部控制回路建单：dedup 幂等，可带 summary 与直接派单 |
 | POST | `/internal/tickets/{id}/review` | 有 | approve / reject |
 | POST | `/internal/runs` | 有 | 开一次作业运行（按 job+day 去重） |
 | POST | `/internal/runs/{id}/finish` | 有 | 落运行结果 |

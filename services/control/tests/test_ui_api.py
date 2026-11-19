@@ -150,6 +150,7 @@ def test_ticket_detail_and_missing(client):
         "code": "T-1",
         "thread_id": "th1",
         "title": "修登录",
+        "summary": "",
         "status": "staged",
         "dedup_key": "dedup-1",
         "created_at": 1000,

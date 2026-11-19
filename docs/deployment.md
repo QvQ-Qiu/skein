@@ -111,6 +111,11 @@ systemctl restart skein-control
 
 没有 `dist/` 时控制面退回 `services/console/legacy/` 静态页；旧页始终保留在 `/console-legacy/`。
 
+自维护回路是独立 unit（不进主进程）：`skein-watchdog.service`，读同一份 `/etc/skein/env`。
+`SKEIN_WATCHDOG_TICKETS=1` 把新信号变成工单，`SKEIN_WATCHDOG_DISPATCH=1` 直接派给平台 `skein`，
+`SKEIN_DAILY_TICKET_HOUR=9` 每天 9 点建「每日巡检」，`SKEIN_TICKET_DAILY_CAP=5` 是每日上限。
+暂停回路：`systemctl stop skein-watchdog` 或把 `SKEIN_WATCHDOG_TICKETS=0`。
+
 ### UniSSO（内接无感登录）
 
 `/etc/skein/env` 追加：

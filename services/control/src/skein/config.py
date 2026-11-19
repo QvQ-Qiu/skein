@@ -40,6 +40,10 @@ class Config:
     watchdog: bool = False
     watchdog_auto: bool = False
     watchdog_interval: int = 300
+    watchdog_tickets: bool = False
+    watchdog_dispatch: bool = False
+    daily_ticket_hour: int = -1
+    ticket_daily_cap: int = 5
     sso_base: str = "https://sso.ssemarket.cn"
     sso_client_id: str = ""
     sso_client_secret: str = ""
@@ -96,6 +100,16 @@ class Config:
             in ("1", "true", "yes"),
             watchdog_interval=int(
                 source.get("SKEIN_WATCHDOG_INTERVAL", base.watchdog_interval)
+            ),
+            watchdog_tickets=source.get("SKEIN_WATCHDOG_TICKETS", "0")
+            in ("1", "true", "yes"),
+            watchdog_dispatch=source.get("SKEIN_WATCHDOG_DISPATCH", "0")
+            in ("1", "true", "yes"),
+            daily_ticket_hour=int(
+                source.get("SKEIN_DAILY_TICKET_HOUR", base.daily_ticket_hour)
+            ),
+            ticket_daily_cap=int(
+                source.get("SKEIN_TICKET_DAILY_CAP", base.ticket_daily_cap)
             ),
             sso_base=source.get("SKEIN_SSO_BASE", base.sso_base),
             sso_client_id=source.get("SKEIN_SSO_CLIENT_ID", base.sso_client_id),

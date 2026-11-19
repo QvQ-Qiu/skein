@@ -112,6 +112,14 @@ class TriggerIn(BaseModel):
     parent_id: str | None = None
 
 
+class TicketIn(BaseModel):
+    title: str
+    summary: str = ""
+    platform: str = ""
+    dedup_key: str = ""
+    dispatch: bool = False
+
+
 def create_app(
     conn: sqlite3.Connection,
     blob_root: str,
@@ -348,6 +356,30 @@ def create_app(
     @app.post("/internal/tickets/{ticket_id}/dispatch", dependencies=[Depends(auth)])
     async def dispatch_ticket(ticket_id: str, platform: str | None = None) -> dict:
         return await hub.dispatch_ticket(ticket_id, platform)
+
+    @app.post("/internal/tickets", dependencies=[Depends(auth)])
+    async def create_ticket(body: TicketIn) -> dict:
+        """外部控制回路（Watchdog、巡检）建单：dedup_key 幂等，可选直接派。"""
+        title = body.title.strip()
+        if not title:
+            raise HTTPException(status_code=400, detail="title required")
+        if body.dedup_key:
+            existing = store.find_ticket_by_dedup(conn, body.dedup_key)
+            if existing:
+                return {"ticket_id": existing, "created": False, "dispatch": None}
+        ticket_id = store.create_ticket(
+            conn, title, None, body.dedup_key or None, body.summary.strip()
+        )
+        db.record_audit(
+            conn,
+            "auto",
+            "ticket",
+            {"ticket_id": ticket_id, "title": title[:120], "dedup_key": body.dedup_key},
+        )
+        result = None
+        if body.dispatch and body.platform:
+            result = await hub.dispatch_ticket(ticket_id, body.platform)
+        return {"ticket_id": ticket_id, "created": True, "dispatch": result}
 
     @app.post("/internal/tickets/{ticket_id}/review", dependencies=[Depends(auth)])
     def review_ticket(ticket_id: str, body: ReviewIn) -> dict:
