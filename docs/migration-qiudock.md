@@ -91,10 +91,21 @@
 - 验证：容器健康、`/ops/login` 直连与公网均 200、采样表出现 `skein_review_backlog` 等、8100 已停。
 - 回滚：scale 回 1 + 恢复 `nginx.conf.bak-ops-cutover-*` + 停容器。
 
+**感知层已并入控制台（2026-11-19）**
+
+- 运行面新增「主机」「Pod」两页：
+  - 主机：CPU / 可用内存 / 磁盘 / load1（带 sparkline）、服务状态、容器占用 Top；
+  - Pod：k3s 全量清单、过滤、点开看日志。
+- 数据来自小秋 ops 的 `/ops/metrics/series`、`/ops/workloads`、`/ops/k8s/pods`；
+  控制面 `SKEIN_QA_OPS_UPSTREAM=http://127.0.0.1:8118`。
+- 面板会话由控制面代签：`SKEIN_OPS_PANEL_SECRET`（ops 镜像 `.env` 里读出）→
+  `ops_session` HMAC cookie；浏览器只带 SSO 会话，不接触面板密钥。
+- 公开访问 `/ops/*` 仍由 nginx `auth_request` 拦到登录页（无会话 302）。
+
 **未完成**
 
 - ops 面的「秋坞动作类工具」（deploy/kill/沙箱）仍走 qdockd API；qdockd 下线前要替换或明确裁掉。
-- 面板（ops-console）仍走自己的路径；下线前需要把「服务状态 + 服务日志」补到 Skein 控制台。
+- 面板（ops-console）的其余页面（动作、审批、对话、追踪）未搬；判断是否需要后即可下线。
 
 ### P5 面板与平台
 
