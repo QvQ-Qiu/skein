@@ -39,7 +39,7 @@ if [ -f "$SKEIN_ENV" ]; then cp "$SKEIN_ENV" "$SKEIN_ENV.bak-$TS"; fi
     grep -E '^UNISSO_CLIENT_SECRET=' /root/unisso-migration/clients/skein.env | sed 's/^UNISSO_CLIENT_SECRET=/SKEIN_SSO_CLIENT_SECRET=/'
   fi
   echo "SKEIN_HOST=172.17.0.1"
-  echo "SKEIN_CONTROL_URL=http://127.0.0.1:7800"
+  echo "SKEIN_CONTROL_URL=http://172.17.0.1:7800"
   echo "SKEIN_WATCHDOG=1"
   echo "SKEIN_WATCHDOG_TICKETS=1"
   echo "SKEIN_WATCHDOG_DISPATCH=${SKEIN_WATCHDOG_DISPATCH:-1}"
