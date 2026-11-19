@@ -12,6 +12,7 @@ class Config:
     db_path: str = "data/skein.db"
     blob_root: str = "data/blobs"
     token: str = ""
+    host: str = "127.0.0.1"
     port: int = 7800
     direct_model: str = "direct"
     route_model: str = "route"
@@ -62,6 +63,7 @@ class Config:
             db_path=source.get("SKEIN_DB", base.db_path),
             blob_root=source.get("SKEIN_BLOB_ROOT", base.blob_root),
             token=source.get("SKEIN_TOKEN", base.token),
+            host=source.get("SKEIN_HOST", base.host),
             port=int(source.get("SKEIN_PORT", base.port)),
             direct_model=source.get("SKEIN_DIRECT_MODEL", base.direct_model),
             route_model=source.get("SKEIN_ROUTE_MODEL", base.route_model),

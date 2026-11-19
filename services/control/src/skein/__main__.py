@@ -64,7 +64,7 @@ def main() -> None:
         if schedules:
             driver = Driver(conn, schedules, commands, timeout=cfg.job_timeout)
             threading.Thread(target=driver.run_forever, daemon=True).start()
-    uvicorn.run(app, host="127.0.0.1", port=cfg.port)
+    uvicorn.run(app, host=cfg.host, port=cfg.port)
 
 
 if __name__ == "__main__":
