@@ -5,7 +5,7 @@
       "name": "skein-control",
       "runtimeExecutable": "bash",
       "runtimeArgs": ["services/control/dev.sh"],
-      "port": 7700
+      "port": 7800
     }
   ]
 }

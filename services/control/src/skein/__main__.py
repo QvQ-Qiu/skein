@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 import json
+import logging
 import threading
 from pathlib import Path
 
 import uvicorn
 
-from skein import db
+from skein import db, logbuf
 from skein.api import create_app
 from skein.channels import HttpWriter
 from skein.config import Config
@@ -34,12 +35,17 @@ def build() -> tuple:
         route_model=cfg.route_model,
         forum_base=cfg.forum_base,
         internal_token=cfg.forum_token,
+        platform_repos=cfg.platform_repos,
     )
     return app, cfg, conn
 
 
 def main() -> None:
+    logbuf.install()
     app, cfg, conn = build()
+    logging.getLogger("skein").info(
+        "control plane started db=%s port=%s", cfg.db_path, cfg.port
+    )
     if cfg.driver_enabled and cfg.schedules:
         schedules = parse_schedules(cfg.schedules)
         try:

@@ -174,11 +174,17 @@ async function runTask(msg) {
   if (!w) { send({ t: 'nack', ticket_id: ticket.id, worker_id, reason: '会话不存在' }); return; }
   if (busy.has(worker_id)) { send({ t: 'nack', ticket_id: ticket.id, worker_id, reason: 'busy（会话单并发）' }); return; }
   const repo = w.wt || w.repo || context.local || REPO_MAP[ticket.platform];
-  const branch = branch_policy || `fix/yz-${ticket.code.toLowerCase()}`;
+  const followup = msg.followup === true;
+  let branch = branch_policy || `fix/yz-${ticket.code.toLowerCase()}`;
+  if (followup) {
+    try { branch = git(repo, 'branch', '--show-current') || branch; } catch {}
+  }
   const baseCommit = git(repo, 'rev-parse', '--short', 'HEAD');
   send({ t: 'ack', ticket_id: ticket.id, worker_id });
   send({ t: 'progress', ticket_id: ticket.id, worker_id, step: '开始', message: `会话 ${w.session_id.slice(0, 8)} 续接，基线 ${baseCommit}，分支 ${branch}`, pct: 5 });
-  const prompt = `需求单 ${ticket.code}（${ticket.kind === 'bug' ? '缺陷' : '功能需求'} / 平台 ${ticket.platform} / 级别 ${ticket.severity}）
+  const prompt = followup
+    ? `同一 Thread 的后续事件（工单 ${ticket.code}）：\n${ticket.title}\n请续接当前任务处理这条后续消息；不要新建分支，不要重做已完成的改动。`
+    : `需求单 ${ticket.code}（${ticket.kind === 'bug' ? '缺陷' : '功能需求'} / 平台 ${ticket.platform} / 级别 ${ticket.severity}）
 标题：${ticket.title}
 摘要：${ticket.summary || ''}
 来源：${ticket.source_url || '内部'}

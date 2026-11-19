@@ -20,6 +20,10 @@ Super-agent 的调度与执行平台。
 
 完整设计见 [docs/architecture.md](docs/architecture.md)。
 
+## 交接
+
+新接手先读 [HANDOVER.md](HANDOVER.md)；产品定位见 [docs/product.md](docs/product.md)。
+
 ## 仓库结构
 
 ```

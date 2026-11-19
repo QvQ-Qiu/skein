@@ -3,7 +3,7 @@ import time
 import pytest
 from fastapi.testclient import TestClient
 
-from skein import db
+from skein import db, store
 from skein.api import create_app
 
 TOKEN = "chan-token"
@@ -125,3 +125,65 @@ def test_review_approve_and_reject(app_client):
         headers={"X-Skein-Token": TOKEN},
     )
     assert bad.status_code == 400
+
+
+def test_followup_pushes_to_subscribed_worker(app_client):
+    conn = app_client.conn
+    ticket = make_ticket(conn, code="SK-F1")
+    conn.execute(
+        "INSERT INTO threads (id, origin, origin_id, created_at) VALUES ('th-f1', 'forum_post', 'p1', 0)"
+    )
+    store.subscribe(conn, "th-f1", ticket)
+    conn.execute(
+        "INSERT INTO dispatches"
+        " (id, ticket_id, node_id, worker_id, state, attempt, updated_at)"
+        " VALUES ('d-f1', ?, 'n1', 'w-f1', 'dispatched', 1, 1)",
+        (ticket,),
+    )
+    with app_client.websocket_connect("/api/agent/channel") as ws:
+        register(ws)
+        response = app_client.post(
+            "/internal/events/followup",
+            json={"thread_id": "th-f1", "text": "补充一下截图"},
+            headers={"X-Skein-Token": TOKEN},
+        )
+        assert response.json() == {"forwarded": True}
+        message = ws.receive_json()
+        assert message["t"] == "dispatch"
+        assert message["followup"] is True
+        assert message["worker_id"] == "w-f1"
+        assert message["ticket"]["title"] == "补充一下截图"
+
+
+def test_cancel_sends_to_node_and_requeues_ticket(app_client):
+    conn = app_client.conn
+    ticket = make_ticket(conn, code="SK-C1")
+    conn.execute("UPDATE tickets SET status = 'assigned' WHERE id = ?", (ticket,))
+    conn.execute(
+        "INSERT INTO dispatches"
+        " (id, ticket_id, node_id, worker_id, state, attempt, updated_at)"
+        " VALUES ('d-c1', ?, 'n1', 'w-c1', 'dispatched', 1, 1)",
+        (ticket,),
+    )
+    with app_client.websocket_connect("/api/agent/channel") as ws:
+        register(ws)
+        response = app_client.post(
+            f"/internal/tickets/{ticket}/cancel",
+            headers={"X-Skein-Token": TOKEN},
+        )
+        assert response.json() == {"cancelled": True}
+        message = ws.receive_json()
+        assert message == {"t": "cancel", "ticket_id": ticket, "worker_id": "w-c1"}
+    state = conn.execute("SELECT state FROM dispatches WHERE id = 'd-c1'").fetchone()[0]
+    status = conn.execute("SELECT status FROM tickets WHERE id = ?", (ticket,)).fetchone()[0]
+    assert state == "failed"
+    assert status == "staged"
+
+
+def test_cancel_without_live_dispatch_conflicts(app_client):
+    ticket = make_ticket(app_client.conn, code="SK-C2")
+    response = app_client.post(
+        f"/internal/tickets/{ticket}/cancel",
+        headers={"X-Skein-Token": TOKEN},
+    )
+    assert response.status_code == 409

@@ -6,13 +6,16 @@
 from __future__ import annotations
 
 import json
+import logging
 import sqlite3
 import time
 
 from fastapi import WebSocket
 from starlette.websockets import WebSocketDisconnect
 
-from skein import db, scheduler
+from skein import db, scheduler, store
+
+log = logging.getLogger("skein.channel")
 
 
 class ChannelHub:
@@ -70,6 +73,12 @@ class ChannelHub:
                 max_workers=int(msg.get("max_workers") or 3),
             )
             self._sockets[node_id] = ws
+            log.info(
+                "node registered %s host=%s platforms=%s",
+                node_id,
+                msg.get("host"),
+                msg.get("platforms"),
+            )
             await ws.send_json({"t": "node.registered", "node_id": node_id})
             return node_id
 
@@ -93,6 +102,11 @@ class ChannelHub:
             return node_id
 
         if kind == "worker.create_failed":
+            log.warning(
+                "worker create failed %s: %s",
+                msg.get("worker_id"),
+                msg.get("reason"),
+            )
             pending = self._pending.pop(str(msg.get("worker_id")), None)
             if pending:
                 scheduler.update_dispatch(
@@ -142,6 +156,7 @@ class ChannelHub:
         scheduler.update_dispatch(self._conn, dispatch_id, state="done")
         if row:
             ticket_id = row["ticket_id"]
+            log.info("result worker=%s ticket=%s", worker_id, ticket_id)
             self._conn.execute(
                 "INSERT OR IGNORE INTO assignments (ticket_id, worker_id, state, result, updated_at)"
                 " VALUES (?, ?, 'done', ?, ?)",
@@ -180,6 +195,7 @@ class ChannelHub:
             "node_id": node_id,
             "platform": platform,
         }
+        log.info("dispatch ticket=%s node=%s worker=%s", ticket_id, node_id, worker_id)
         await ws.send_json(
             {
                 "t": "worker.create",
@@ -189,3 +205,59 @@ class ChannelHub:
             }
         )
         return {"ok": True, "dispatch_id": dispatch_id, "worker_id": worker_id, "node_id": node_id}
+
+    async def followup(self, thread_id: str, event: dict) -> bool:
+        """把同一 Thread 的后续事件直接推给已订阅的 worker；失败由调用方回退。"""
+        sub = store.active_subscription(self._conn, thread_id)
+        if not sub or not sub.get("worker_id") or not sub.get("node_id"):
+            return False
+        ws = self._sockets.get(str(sub["node_id"]))
+        if ws is None:
+            return False
+        await ws.send_json(
+            {
+                "t": "dispatch",
+                "worker_id": sub["worker_id"],
+                "followup": True,
+                "ticket": {
+                    "id": sub["ticket_id"],
+                    "code": sub.get("code") or "FOLLOWUP",
+                    "title": str(event.get("text") or "")[:200],
+                    "platform": "",
+                    "kind": "followup",
+                    "severity": "normal",
+                    "summary": "",
+                    "source_url": "",
+                },
+            }
+        )
+        return True
+
+    async def cancel_ticket(self, ticket_id: str) -> bool:
+        """向节点发 cancel，并把派工与工单状态落回可重派。"""
+        row = self._conn.execute(
+            "SELECT id, node_id, worker_id FROM dispatches"
+            " WHERE ticket_id = ? AND state IN ('dispatched', 'created', 'pending')"
+            " ORDER BY updated_at DESC LIMIT 1",
+            (ticket_id,),
+        ).fetchone()
+        if row is None or not row["node_id"]:
+            return False
+        ws = self._sockets.get(str(row["node_id"]))
+        if ws is None:
+            return False
+        await ws.send_json(
+            {
+                "t": "cancel",
+                "ticket_id": ticket_id,
+                "worker_id": row["worker_id"],
+            }
+        )
+        scheduler.update_dispatch(self._conn, row["id"], state="failed", detail="cancelled")
+        self._conn.execute(
+            "UPDATE tickets SET status = 'staged', updated_at = ?"
+            " WHERE id = ? AND status IN ('assigned', 'running')",
+            (time.time(), ticket_id),
+        )
+        db.record_audit(self._conn, "human", "cancel", {"ticket_id": ticket_id})
+        return True

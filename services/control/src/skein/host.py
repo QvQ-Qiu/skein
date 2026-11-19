@@ -8,8 +8,16 @@ from dataclasses import dataclass
 from skein import db, store
 from skein.admission import DEFAULT_POLICY, Event, SourcePolicy, Verdict, decide
 from skein.llm import LLMClient
+from skein.router.context import event_context
 from skein.router.direct import DISPATCH_RESULT_TEXT, DirectRouter
-from skein.router.dispatch import ROUTE_SYSTEM_PROMPT, build_route_request, parse_route_response
+from skein.router.dispatch import (
+    ROUTE_SYSTEM_PROMPT,
+    RouteDecision,
+    build_batch_route_request,
+    build_route_request,
+    parse_batch_route_response,
+    parse_route_response,
+)
 
 
 @dataclass(frozen=True)
@@ -82,8 +90,45 @@ class RouterHost:
                 ],
             )
         )
-        route = parse_route_response(raw)
+        return self._apply_route(event, thread_id, parse_route_response(raw))
+
+    def dispatch_batch(
+        self,
+        triggers: list[tuple[Event, str]],
+        history: list[dict] | None = None,
+    ) -> list[HostResult]:
+        """一批 Trigger 只打一次模型；失败时回退到逐条判定，避免整批丢失。"""
+        if not triggers:
+            return []
+        events = [
+            event_context(event, index, thread_id)
+            for index, (event, thread_id) in enumerate(triggers)
+        ]
+        try:
+            raw = self._llm.complete(
+                build_batch_route_request(self._route_model, events, history)
+            )
+            decisions = parse_batch_route_response(raw, len(triggers))
+        except Exception:  # noqa: BLE001
+            return [
+                self.handle_admitted(event, thread_id)
+                for event, thread_id in triggers
+            ]
+        return [
+            self._apply_route(event, thread_id, decision)
+            for (event, thread_id), decision in zip(triggers, decisions)
+        ]
+
+    def _apply_route(
+        self, event: Event, thread_id: str, route: RouteDecision
+    ) -> HostResult:
         if route.action != "route":
+            db.record_audit(
+                self._conn,
+                "router",
+                route.action,
+                {"origin_id": event.origin_id, "note": route.note},
+            )
             return HostResult(route.action)
 
         dedup_key = f"{event.source}:{event.origin_id}"

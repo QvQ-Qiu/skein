@@ -13,5 +13,6 @@ public/
 __pycache__/
 .pytest_cache/
 .venv/
+*.egg-info/
 *.pyc
 .ruff_cache/

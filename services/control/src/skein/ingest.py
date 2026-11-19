@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from typing import Protocol
 
 from skein import db, store
-from skein.admission import DEFAULT_POLICY, Event, SourcePolicy, Verdict, decide
+from skein.admission import Event, Verdict, decide, policy_for
 
 
 @dataclass(frozen=True)
@@ -37,12 +37,10 @@ class Ingestor:
         self,
         conn: sqlite3.Connection,
         source: Source,
-        policy: SourcePolicy = DEFAULT_POLICY,
         on_process: Callable[[Event, str], object] | None = None,
     ) -> None:
         self._conn = conn
         self._source = source
-        self._policy = policy
         self._on_process = on_process
 
     def poll(self, limit: int = 100) -> int:
@@ -65,7 +63,7 @@ class Ingestor:
                 mentioned=item.mentioned,
                 parent_id=item.parent_id,
             )
-            decision = decide(event, self._policy)
+            decision = decide(event, policy_for(self._conn, event.source))
             thread_origin, thread_key = store.thread_identity(event)
             thread_id = store.ensure_thread(self._conn, thread_origin, thread_key)
             store.record_event(

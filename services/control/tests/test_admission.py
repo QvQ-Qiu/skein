@@ -1,8 +1,24 @@
+import json
 from dataclasses import FrozenInstanceError
 
 import pytest
 
-from skein.admission import Decision, Event, SourcePolicy, Verdict, decide
+from skein import db
+from skein.admission import (
+    DEFAULT_POLICY,
+    POLICIES_KEY,
+    Decision,
+    Event,
+    SourcePolicy,
+    Verdict,
+    decide,
+    load_policies,
+    policy_for,
+    policy_from_dict,
+    policy_to_dict,
+)
+from skein.ingest import Ingestor, RawItem
+from skein.store import kv_set
 
 
 def test_mention_is_processed():
@@ -71,3 +87,134 @@ def test_decision_is_frozen():
     d = Decision(Verdict.IGNORE, "x")
     with pytest.raises(FrozenInstanceError):
         d.reason = "y"
+
+
+@pytest.fixture()
+def conn(tmp_path):
+    c = db.connect(tmp_path / "admission.db")
+    db.migrate(c)
+    yield c
+    c.close()
+
+
+def _defaults():
+    return {
+        "accept": True,
+        "require_mention": True,
+        "record_unmentioned": True,
+        "min_text_chars": 2,
+    }
+
+
+def test_policy_from_dict_fills_missing_and_ignores_bad_values():
+    policy = policy_from_dict(
+        {
+            "accept": False,
+            "require_mention": 0,
+            "record_unmentioned": "yes",
+            "min_text_chars": True,
+            "extra": 1,
+        }
+    )
+    assert policy == SourcePolicy(accept=False)
+    assert policy_from_dict(["nope"]) == DEFAULT_POLICY
+    assert policy_from_dict({"min_text_chars": 201}) == DEFAULT_POLICY
+    assert policy_from_dict({"min_text_chars": -1}) == DEFAULT_POLICY
+    assert policy_from_dict({"min_text_chars": 0}) == SourcePolicy(min_text_chars=0)
+
+
+def test_policy_dict_round_trip():
+    policy = SourcePolicy(
+        accept=False, require_mention=False, record_unmentioned=False, min_text_chars=200
+    )
+    assert policy_from_dict(policy_to_dict(policy)) == policy
+
+
+def test_load_policies_without_row_is_default(conn):
+    assert load_policies(conn) == {"default": _defaults(), "sources": {}}
+    assert policy_for(conn, "forum_comment") == DEFAULT_POLICY
+
+
+def test_load_policies_repairs_partial_and_skips_garbage(conn):
+    kv_set(
+        conn,
+        POLICIES_KEY,
+        json.dumps(
+            {
+                "default": {"accept": 1, "min_text_chars": 9},
+                "sources": {
+                    "forum_post": {"require_mention": False, "min_text_chars": "2"},
+                    "Nope": {"accept": False},
+                    "ok-name": "x",
+                    "a" * 65: {"accept": False},
+                },
+                "extra": True,
+            }
+        ),
+    )
+    loaded = load_policies(conn)
+    assert loaded["default"]["accept"] is True
+    assert loaded["default"]["min_text_chars"] == 9
+    assert loaded["sources"] == {
+        "forum_post": {
+            "accept": True,
+            "require_mention": False,
+            "record_unmentioned": True,
+            "min_text_chars": 2,
+        }
+    }
+    assert policy_for(conn, "forum_post").require_mention is False
+    assert policy_for(conn, "forum_post").accept is True
+    assert policy_for(conn, "missing").min_text_chars == 9
+
+
+def test_load_policies_ignores_bad_json(conn):
+    kv_set(conn, POLICIES_KEY, "{")
+    assert load_policies(conn) == {"default": _defaults(), "sources": {}}
+    kv_set(conn, POLICIES_KEY, "[]")
+    assert policy_for(conn, "forum_post") == DEFAULT_POLICY
+
+
+class _Source:
+    name = "forum"
+
+    def __init__(self, items):
+        self._items = items
+
+    def fetch(self, since, limit):
+        return list(self._items)
+
+
+def test_ingestor_uses_source_policy(conn):
+    kv_set(
+        conn,
+        POLICIES_KEY,
+        json.dumps(
+            {
+                "default": _defaults(),
+                "sources": {"forum_comment": {"accept": False}},
+            }
+        ),
+    )
+    items = [
+        RawItem(
+            source="forum_post",
+            origin_id="p1",
+            text="帮我看下",
+            created_at=1,
+            mentioned=True,
+        ),
+        RawItem(
+            source="forum_comment",
+            origin_id="c1",
+            text="帮我看下",
+            created_at=2,
+            mentioned=True,
+        ),
+    ]
+    assert Ingestor(conn, _Source(items)).poll() == 2
+    verdicts = {
+        row["origin_id"]: row["verdict"]
+        for row in conn.execute("SELECT origin_id, verdict FROM events")
+    }
+    assert verdicts == {"p1": "process", "c1": "ignore"}

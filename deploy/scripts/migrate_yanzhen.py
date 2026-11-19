@@ -65,7 +65,11 @@ def event_verdict(raw) -> str:
     except (TypeError, json.JSONDecodeError):
         return "record"
     if isinstance(data, dict):
-        return "process" if data.get("is_req") else "ignore"
+        if data.get("is_req"):
+            return "process"
+        if data.get("kind") == "question":
+            return "record"
+        return "ignore"
     return "record"
 
 
@@ -87,7 +91,14 @@ def migrate(old_path: str, new_path: str, dry_run: bool = False) -> dict:
 
     thread_ids: dict[str, str] = {}
     event_thread: dict[str, str] = {}
-    counts = {"events": 0, "tickets": 0, "assignments": 0, "nodes": 0}
+    counts = {
+        "events": 0,
+        "tickets": 0,
+        "assignments": 0,
+        "dispatches": 0,
+        "sessions": 0,
+        "nodes": 0,
+    }
 
     def ensure_thread(post_key: str) -> str:
         if post_key in thread_ids:
@@ -116,7 +127,7 @@ def migrate(old_path: str, new_path: str, dry_run: bool = False) -> dict:
             ensure_ascii=False,
         )
         try:
-            new.execute(
+            cursor = new.execute(
                 "INSERT INTO events (id, origin, origin_id, thread_id, payload, verdict, created_at)"
                 " VALUES (?, ?, ?, ?, ?, ?, ?)",
                 (
@@ -129,15 +140,22 @@ def migrate(old_path: str, new_path: str, dry_run: bool = False) -> dict:
                     parse_ts(row["fetched_at"]) or 0.0,
                 ),
             )
-            counts["events"] += 1
+            if cursor.rowcount:
+                counts["events"] += 1
         except sqlite3.IntegrityError:
             pass
         event_thread[str(row["id"])] = thread_id
 
+    new.execute(
+        "UPDATE threads SET created_at = COALESCE("
+        "(SELECT MIN(events.created_at) FROM events WHERE events.thread_id = threads.id), 0)"
+        " WHERE created_at = 0"
+    )
+
     for row in old.execute("SELECT * FROM tickets"):
         thread_id = event_thread.get(str(row["source_event_id"]))
         try:
-            new.execute(
+            cursor = new.execute(
                 "INSERT INTO tickets (id, code, thread_id, title, status, dedup_key, created_at, updated_at)"
                 " VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
                 (
@@ -151,31 +169,108 @@ def migrate(old_path: str, new_path: str, dry_run: bool = False) -> dict:
                     parse_ts(row["updated_at"]) or 0.0,
                 ),
             )
-            counts["tickets"] += 1
+            if cursor.rowcount:
+                counts["tickets"] += 1
         except sqlite3.IntegrityError:
             pass
 
-    for row in old.execute("SELECT * FROM ticket_workers"):
+    worker_tickets: dict[str, set[str]] = {}
+    worker_node: dict[str, str] = {}
+    for row in old.execute("SELECT * FROM ticket_workers ORDER BY assigned_at"):
+        worker_id = str(row["worker_id"])
+        worker_tickets.setdefault(worker_id, set()).add(str(row["ticket_id"]))
+        state = {
+            "delivered": "done",
+            "expired": "failed",
+        }.get(str(row["state"] or ""), row["state"] or "assigned")
+        lease = parse_ts(row["lease_until"]) if row["lease_until"] else None
         try:
-            new.execute(
-                "INSERT OR IGNORE INTO assignments (ticket_id, worker_id, state, result, updated_at)"
-                " VALUES (?, ?, ?, ?, ?)",
+            cursor = new.execute(
+                "INSERT OR IGNORE INTO assignments"
+                " (ticket_id, worker_id, state, lease_until, result, updated_at)"
+                " VALUES (?, ?, ?, ?, ?, ?)",
                 (
                     str(row["ticket_id"]),
-                    str(row["worker_id"]),
-                    row["state"] or "assigned",
+                    worker_id,
+                    state,
+                    lease,
                     row["result"],
                     parse_ts(row["assigned_at"]) or 0.0,
                 ),
             )
-            counts["assignments"] += 1
+            if cursor.rowcount:
+                counts["assignments"] += 1
+        except sqlite3.IntegrityError:
+            pass
+
+    for row in old.execute("SELECT * FROM workers"):
+        worker_id = str(row["id"])
+        worker_node[worker_id] = str(row["node_id"] or "")
+        session_id = str(row["session_id"] or f"old-worker-{worker_id}")
+        tickets = worker_tickets.get(worker_id, set())
+        ticket_id = next(iter(tickets)) if len(tickets) == 1 else None
+        try:
+            cursor = new.execute(
+                "INSERT OR IGNORE INTO sessions"
+                " (id, ticket_id, node_id, pinned, created_at, updated_at)"
+                " VALUES (?, ?, ?, 1, ?, ?)",
+                (
+                    session_id,
+                    ticket_id,
+                    worker_node[worker_id] or None,
+                    parse_ts(row["registered_at"]) or 0.0,
+                    parse_ts(row["last_seen"]) or 0.0,
+                ),
+            )
+            if cursor.rowcount:
+                counts["sessions"] += 1
+        except sqlite3.IntegrityError:
+            pass
+
+    latest_dispatch: dict[tuple[str, str], sqlite3.Row] = {}
+    for row in old.execute("SELECT * FROM dispatches ORDER BY at"):
+        if row["ticket_id"] is None or row["worker_id"] is None:
+            continue
+        latest_dispatch[(str(row["ticket_id"]), str(row["worker_id"]))] = row
+    for (ticket_id, worker_id), row in latest_dispatch.items():
+        action = str(row["action"] or "")
+        state = (
+            "done"
+            if action == "result"
+            else "failed"
+            if action in {"nack", "lease_expired", "cancel", "cancelled", "failed"}
+            else "dispatched"
+        )
+        dispatch_id = f"old-d-{ticket_id}-{worker_id}"
+        existed = (
+            new.execute("SELECT 1 FROM dispatches WHERE id = ?", (dispatch_id,)).fetchone()
+            is not None
+        )
+        try:
+            cursor = new.execute(
+                "INSERT OR REPLACE INTO dispatches"
+                " (id, ticket_id, node_id, worker_id, state, attempt, detail, updated_at)"
+                " VALUES (?, ?, ?, ?, ?, 1, ?, ?)",
+                (
+                    dispatch_id,
+                    ticket_id,
+                    worker_node.get(worker_id) or "unknown",
+                    worker_id,
+                    state,
+                    row["payload"],
+                    parse_ts(row["at"]) or 0.0,
+                ),
+            )
+            if not existed and cursor.rowcount:
+                counts["dispatches"] += 1
         except sqlite3.IntegrityError:
             pass
 
     for row in old.execute("SELECT * FROM nodes"):
         try:
-            new.execute(
-                "INSERT OR REPLACE INTO nodes (id, name, host, platforms, peer_url, status, max_workers, last_seen)"
+            cursor = new.execute(
+                "INSERT OR IGNORE INTO nodes"
+                " (id, name, host, platforms, peer_url, status, max_workers, last_seen)"
                 " VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     str(row["id"]),
@@ -188,7 +283,8 @@ def migrate(old_path: str, new_path: str, dry_run: bool = False) -> dict:
                     parse_ts(row["last_seen"]) or 0.0,
                 ),
             )
-            counts["nodes"] += 1
+            if cursor.rowcount:
+                counts["nodes"] += 1
         except sqlite3.IntegrityError:
             pass
 

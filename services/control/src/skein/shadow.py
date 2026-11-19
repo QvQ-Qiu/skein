@@ -19,7 +19,7 @@ class ShadowDispatcher:
         self._llm = llm
         self._model = route_model
 
-    def __call__(self, event: Event) -> str:
+    def __call__(self, event: Event, thread_id: str | None = None) -> str:
         raw = self._llm.complete(
             build_route_request(
                 self._model,

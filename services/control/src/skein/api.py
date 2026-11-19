@@ -15,13 +15,15 @@ from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from skein import db, prompts, runs, watchdog
+from skein import db, prompts, runs, store, watchdog
+from skein.admission import Event, decide
 from skein.channel import ChannelHub
 from skein.compat import ForumCompatWriter
 from skein.host import RouterHost
 from skein.outbox import EffectState, EmitResult, Outbox, get
 from skein.session_store import SessionStore, TurnConflict
 from skein.summary import summary as build_summary
+from skein.ui_api import create_ui_router
 
 
 class ChatIn(BaseModel):
@@ -73,6 +75,22 @@ class PromptActionIn(BaseModel):
     part: str
 
 
+class FollowupIn(BaseModel):
+    thread_id: str
+    source: str = ""
+    origin_id: str = ""
+    text: str = ""
+
+
+class TriggerIn(BaseModel):
+    source: str
+    origin_id: str
+    text: str = ""
+    actor: str | None = None
+    mentioned: bool = False
+    parent_id: str | None = None
+
+
 def create_app(
     conn: sqlite3.Connection,
     blob_root: str,
@@ -95,6 +113,8 @@ def create_app(
     def auth(x_skein_token: str = Header(default="")) -> None:
         if not token or x_skein_token != token:
             raise HTTPException(status_code=401, detail="unauthorized")
+
+    app.include_router(create_ui_router(conn, blob_root, auth))
 
     @app.get("/health/live")
     def live() -> dict:
@@ -208,6 +228,17 @@ def create_app(
         prompts.unfreeze(conn, body.part)
         return prompts.state(conn, body.part)
 
+    @app.post("/internal/events/followup", dependencies=[Depends(auth)])
+    async def followup(body: FollowupIn) -> dict:
+        forwarded = await hub.followup(body.thread_id, body.model_dump())
+        return {"forwarded": forwarded}
+
+    @app.post("/internal/tickets/{ticket_id}/cancel", dependencies=[Depends(auth)])
+    async def cancel_ticket(ticket_id: str) -> dict:
+        if not await hub.cancel_ticket(ticket_id):
+            raise HTTPException(status_code=409, detail="no_live_dispatch")
+        return {"cancelled": True}
+
     @app.websocket("/api/agent/channel")
     async def agent_channel(ws: WebSocket) -> None:
         await hub.serve(ws)
@@ -267,6 +298,32 @@ def create_app(
         stored = get(conn, key)
         return stored.response if stored and stored.response else {"code": 200, "data": None}
 
+    @app.post("/internal/trigger", dependencies=[Depends(auth)])
+    def trigger(body: TriggerIn) -> dict:
+        event = Event(
+            source=body.source,
+            origin_id=body.origin_id,
+            text=body.text,
+            actor=body.actor,
+            mentioned=body.mentioned,
+            parent_id=body.parent_id,
+        )
+        if host is not None:
+            result = host.on_event(event)
+            return {"action": result.action, "ticket_id": result.ticket_id}
+        decision = decide(event)
+        thread_origin, thread_key = store.thread_identity(event)
+        thread_id = store.ensure_thread(conn, thread_origin, thread_key)
+        store.record_event(
+            conn,
+            event.source,
+            event.origin_id,
+            thread_id,
+            {"text": event.text, "actor": event.actor},
+            decision.verdict.value,
+        )
+        return {"action": decision.verdict.value, "thread_id": thread_id}
+
     if host is not None:
 
         @app.post("/internal/chat", dependencies=[Depends(auth)])
@@ -291,14 +348,30 @@ def create_app(
 
     @app.post("/internal/outbox/emit", dependencies=[Depends(auth)])
     def emit(body: EmitIn) -> dict:
+        if not forum_base:
+            raise HTTPException(status_code=503, detail="forum not configured")
         result = outbox.emit(body.key, body.kind, body.object, body.payload)
         if result == EmitResult.FAILED:
             raise HTTPException(status_code=502, detail="effect failed")
         return {"result": result}
 
-    console_dir = Path(__file__).resolve().parents[3] / "console"
+    console_root = Path(__file__).resolve().parents[3] / "console"
+    legacy_dir = console_root / "legacy"
+    dist_dir = console_root / "dist"
+    # 先挂 /console-legacy，再挂 /console，避免较短前缀截获旧页。
+    if legacy_dir.is_dir():
+        app.mount(
+            "/console-legacy",
+            StaticFiles(directory=str(legacy_dir), html=True),
+            name="console-legacy",
+        )
+    console_dir = dist_dir if dist_dir.is_dir() else legacy_dir
     if console_dir.is_dir():
-        app.mount("/console", StaticFiles(directory=str(console_dir), html=True), name="console")
+        app.mount(
+            "/console",
+            StaticFiles(directory=str(console_dir), html=True),
+            name="console",
+        )
 
         @app.get("/")
         def root() -> RedirectResponse:

@@ -108,3 +108,20 @@ def subscribe(conn: sqlite3.Connection, thread_id: str, ticket_id: str) -> None:
         " VALUES (?, ?, 'active', ?)",
         (thread_id, ticket_id, time.time()),
     )
+
+
+def active_subscription(
+    conn: sqlite3.Connection, thread_id: str
+) -> dict[str, str | None] | None:
+    """该 Thread 上仍活跃、且有在途派工的订阅。"""
+    row = conn.execute(
+        "SELECT s.ticket_id, t.code, d.worker_id, d.node_id"
+        " FROM subscriptions s"
+        " JOIN tickets t ON t.id = s.ticket_id"
+        " JOIN dispatches d ON d.ticket_id = s.ticket_id"
+        "   AND d.state IN ('dispatched', 'created', 'pending')"
+        " WHERE s.thread_id = ? AND s.state = 'active'"
+        " ORDER BY d.updated_at DESC LIMIT 1",
+        (thread_id,),
+    ).fetchone()
+    return dict(row) if row else None

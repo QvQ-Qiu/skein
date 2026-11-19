@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>雁阵</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <header>
+    <h1>雁阵</h1>
+    <div class="token">
+      <label for="token">令牌</label>
+      <input id="token" type="password" placeholder="填入控制面令牌后回车保存" autocomplete="off" />
+      <span id="status" class="muted">未连接</span>
+    </div>
+  </header>
+
+  <nav id="tabs">
+    <button data-view="summary" class="active">概览</button>
+    <button data-view="tickets">工单</button>
+    <button data-view="nodes">节点</button>
+    <button data-view="runs">运行</button>
+    <button data-view="signals">信号</button>
+    <button data-view="prompts">提示词</button>
+  </nav>
+
+  <main>
+    <section id="view-summary" class="view active">
+      <div id="summary-cards" class="cards"></div>
+    </section>
+
+    <section id="view-tickets" class="view">
+      <table>
+        <thead><tr><th>编号</th><th>标题</th><th>状态</th><th>操作</th></tr></thead>
+        <tbody id="tickets-body"></tbody>
+      </table>
+    </section>
+
+    <section id="view-nodes" class="view">
+      <table>
+        <thead><tr><th>节点</th><th>主机</th><th>平台</th><th>状态</th><th>容量</th><th>最后心跳</th></tr></thead>
+        <tbody id="nodes-body"></tbody>
+      </table>
+    </section>
+
+    <section id="view-runs" class="view">
+      <table>
+        <thead><tr><th>作业</th><th>日期</th><th>状态</th><th>说明</th></tr></thead>
+        <tbody id="runs-body"></tbody>
+      </table>
+    </section>
+
+    <section id="view-signals" class="view">
+      <ul id="signals-list" class="signals"></ul>
+    </section>
+
+    <section id="view-prompts" class="view">
+      <table>
+        <thead><tr><th>段</th><th>稳定版</th><th>金丝雀</th><th>冻结至</th><th>操作</th></tr></thead>
+        <tbody id="prompts-body"></tbody>
+      </table>
+    </section>
+  </main>
+
+  <script src="app.js"></script>
+</body>
+</html>

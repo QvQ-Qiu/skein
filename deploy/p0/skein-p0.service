@@ -1,0 +1,16 @@
+[Unit]
+Description=Skein P0 rehearsal control plane (read-only)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/root/skein-p0/services/control
+EnvironmentFile=/etc/skein-p0/env
+ExecStart=/root/skein-p0/services/control/.venv/bin/python -m skein
+Restart=always
+RestartSec=5
+LimitNOFILE=65536
+
+[Install]
+WantedBy=multi-user.target

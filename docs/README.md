@@ -4,9 +4,10 @@
 
 ## 想快速了解这套系统
 
-1. [architecture.md](architecture.md) —— 五模块与三份权威，为什么这么分层
-2. [plan.md](plan.md) —— 目标、已完成、剩余工作、验收标准
-3. [control-plane.md](control-plane.md) —— 模块清单、接口、环境变量
+1. [product.md](product.md) —— 一句话、核心闭环、四个工作面
+2. [architecture.md](architecture.md) —— 五模块与三份权威，为什么这么分层
+3. [plan.md](plan.md) —— 目标、已完成、剩余工作、验收标准
+4. [control-plane.md](control-plane.md) —— 模块清单、接口、环境变量
 
 ## 要部署或切换
 

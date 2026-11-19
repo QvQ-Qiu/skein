@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+import json
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 
 @dataclass(frozen=True)
@@ -30,11 +31,28 @@ class Config:
     job_commands: str = ""
     driver_enabled: bool = False
     job_timeout: int = 14400
+    platform_repos: dict[str, str] = field(default_factory=dict)
+    router_session: bool = False
+    router_batch: int = 8
+    router_interval: float = 0.5
+    control_url: str = ""
+    watchdog: bool = False
+    watchdog_auto: bool = False
+    watchdog_interval: int = 300
 
     @classmethod
     def from_env(cls, env: dict[str, str] | None = None) -> Config:
         source = os.environ if env is None else env
         base = cls()
+        try:
+            parsed_repos = json.loads(source.get("SKEIN_PLATFORM_REPOS", "") or "{}")
+        except json.JSONDecodeError:
+            parsed_repos = {}
+        platform_repos = (
+            {str(key): str(value) for key, value in parsed_repos.items()}
+            if isinstance(parsed_repos, dict)
+            else {}
+        )
         return cls(
             db_path=source.get("SKEIN_DB", base.db_path),
             blob_root=source.get("SKEIN_BLOB_ROOT", base.blob_root),
@@ -58,4 +76,18 @@ class Config:
             job_commands=source.get("SKEIN_JOB_COMMANDS", base.job_commands),
             driver_enabled=source.get("SKEIN_DRIVER", "0") in ("1", "true", "yes"),
             job_timeout=int(source.get("SKEIN_JOB_TIMEOUT", base.job_timeout)),
+            platform_repos=platform_repos,
+            router_session=source.get("SKEIN_ROUTER_SESSION", "0")
+            in ("1", "true", "yes"),
+            router_batch=int(source.get("SKEIN_ROUTER_BATCH", base.router_batch)),
+            router_interval=float(
+                source.get("SKEIN_ROUTER_INTERVAL", base.router_interval)
+            ),
+            control_url=source.get("SKEIN_CONTROL_URL", base.control_url),
+            watchdog=source.get("SKEIN_WATCHDOG", "0") in ("1", "true", "yes"),
+            watchdog_auto=source.get("SKEIN_WATCHDOG_AUTO", "0")
+            in ("1", "true", "yes"),
+            watchdog_interval=int(
+                source.get("SKEIN_WATCHDOG_INTERVAL", base.watchdog_interval)
+            ),
         )
