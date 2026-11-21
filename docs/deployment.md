@@ -74,14 +74,14 @@ SKEIN_TICKET_DAILY_CAP=5
 
 ## 三·五、小秋前厅（论坛闭环）
 
-chat 容器镜像 `xiaoqiu:1.0.106-skein-frontdesk`（纯 chat + 前厅；ops 面已下线），host network，监听 `8119`；
+chat 容器镜像 `xiaoqiu:1.0.109-skein-frontdesk`（纯 chat + 前厅；ops 面已下线），host network，监听 `8119`；
 `SKEIN_QA_CHAT_UPSTREAM` 指向 `http://127.0.0.1:8119`。
 
 构建：
 
 ```bash
 cd /root/xiaoqiu-build
-docker build -f docker/Dockerfile.skein-frontdesk -t xiaoqiu:1.0.106-skein-frontdesk .
+docker build -f docker/Dockerfile.skein-frontdesk -t xiaoqiu:1.0.109-skein-frontdesk .
 ```
 
 镜像直接覆盖 `app/frontdesk.py` 和 `app/api/internal.py`；`app/main.py` 仍用

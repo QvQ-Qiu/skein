@@ -36,15 +36,10 @@ node deploy/dev/preview-proxy.mjs services/console/dist http://127.0.0.1:7800 51
 
 打开 `http://127.0.0.1:5173/console/`，用上面的 E2E 账号登录。
 
-## 4. 感知层（主机/Pod 页）
+## 4. 感知层
 
-这两页的数据来自小秋 ops 的 `/ops/*`，本地需要控制面能到 ops 上游：
-
-- 本机直接跑小秋 ops 时：`SKEIN_QA_OPS_UPSTREAM=http://127.0.0.1:8118`；
-- 只调控制面时：可不设，页面会 503，属预期。
-
-控制面为 ops 上游代签 `ops_session` 需要 `SKEIN_OPS_PANEL_SECRET`（与 ops 的
-`OPS_PANEL_SECRET` 相同）。**该密钥不进仓库，也不进浏览器。**
+节点/信号数据直接来自控制面 `/internal/nodes`、`/internal/signals`。
+小秋 ops 面已下线，旧 `/ops/*` 页面不再存在。
 
 ## 说明
 

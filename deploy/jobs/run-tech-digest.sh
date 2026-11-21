@@ -35,7 +35,6 @@ set -a
 set +a
 export SSE_MARKET_BASE_URL=https://api.ssemarket.cn/v1
 export SSE_MARKET_MODEL=${TECH_DIGEST_MODEL:-qwen-3.8-flash}
-unset QDOCK_API_KEY || true
 
 ln -sfn "$STATE" "$SRC/tech-digest/data"
 cd "$SRC/tech-digest"

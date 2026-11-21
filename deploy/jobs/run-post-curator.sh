@@ -36,7 +36,6 @@ set +a
 export LLM_BASE_URL=https://api.ssemarket.cn/v1
 export LLM_MODEL=${POST_CURATOR_MODEL:-qwen-3.8-flash}
 export LLM_API_KEY=${SSE_MARKET_API_KEY:?missing SSE_MARKET_API_KEY}
-unset QDOCK_API_KEY || true
 export FORUM_DB_HOST=${FORUM_DB_HOST:-127.0.0.1}
 export FORUM_DB_PORT=${FORUM_DB_PORT:-3506}
 export FORUM_DB_NAME=${FORUM_DB_NAME:-ssemarket}

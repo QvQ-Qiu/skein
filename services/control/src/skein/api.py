@@ -1,4 +1,4 @@
-"""控制面的 HTTP 接口：健康检查、transcript 上传、Outbox 写入。"""
+"""控制面的 HTTP 接口：健康检查、工单/前厅、Agent、transcript 与留痕。"""
 
 from __future__ import annotations
 

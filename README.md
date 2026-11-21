@@ -28,13 +28,11 @@ Super-agent 的调度与执行平台。
 
 ```
 services/
-  control/      控制面（Python）：Router 宿主、准入、领域库、Outbox
+  control/      控制面（Python）：工单/事件、Agent、节点通道、调度与留痕
   node-agent/   节点 daemon（Node）：反向拨入、worktree、Claude Code、transcript 同步
   console/      控制台（Vue3 + naive-ui）
 deploy/
   scripts/      发布与验收脚本
-legacy/
-  dispatcher/   [迁移中] 重构前的 Node 调度台
 docs/
   README.md                  文档索引
   architecture.md            五模块与三份权威
