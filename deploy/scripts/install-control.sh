@@ -21,11 +21,9 @@ if [ -f "$SKEIN_ENV" ]; then cp "$SKEIN_ENV" "$SKEIN_ENV.bak-$TS"; fi
   echo "SKEIN_PORT=7800"
   echo "SKEIN_TOKEN=$(python3 -c 'import secrets; print(secrets.token_urlsafe(32))')"
   echo "SKEIN_DISPATCH=0"
-  echo "SKEIN_FORUM_BASE=http://127.0.0.1:8080"
-  echo "SKEIN_FORUM_TOKEN=${SKEIN_FORUM_TOKEN:-}"
-  echo "SKEIN_LLM_BASE=${SKEIN_LLM_BASE:-https://api.ssemarket.cn/v1}"
+  echo "SKEIN_LLM_BASE=${SKEIN_LLM_BASE:-https://api.deepseek.com/v1}"
   echo "SKEIN_LLM_KEY=${SKEIN_LLM_KEY:-}"
-  echo "SKEIN_AGENT_MODEL=${SKEIN_AGENT_MODEL:-qwen-3.8-flash}"
+  echo "SKEIN_AGENT_MODEL=${SKEIN_AGENT_MODEL:-deepseek-v4-flash-vision-exp}"
   echo "SKEIN_SSO_BASE=https://sso.ssemarket.cn"
   if [ -f /root/unisso-migration/clients/skein.env ]; then
     # 凭据只落 env 文件，不回显

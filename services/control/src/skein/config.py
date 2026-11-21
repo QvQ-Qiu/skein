@@ -14,11 +14,8 @@ class Config:
     token: str = ""
     host: str = "127.0.0.1"
     port: int = 7800
-    direct_model: str = "direct"
     route_model: str = "route"
     agent_model: str = "deepseek-v4-flash-vision-exp"
-    forum_base: str = "http://127.0.0.1:8080"
-    forum_token: str = ""
     llm_base: str = ""
     llm_key: str = ""
     dispatch: bool = False
@@ -68,11 +65,8 @@ class Config:
             token=source.get("SKEIN_TOKEN", base.token),
             host=source.get("SKEIN_HOST", base.host),
             port=int(source.get("SKEIN_PORT", base.port)),
-            direct_model=source.get("SKEIN_DIRECT_MODEL", base.direct_model),
             route_model=source.get("SKEIN_ROUTE_MODEL", base.route_model),
             agent_model=source.get("SKEIN_AGENT_MODEL", base.agent_model),
-            forum_base=source.get("SKEIN_FORUM_BASE", base.forum_base),
-            forum_token=source.get("SKEIN_FORUM_TOKEN", base.forum_token),
             llm_base=source.get("SKEIN_LLM_BASE", base.llm_base),
             llm_key=source.get("SKEIN_LLM_KEY", base.llm_key),
             dispatch=source.get("SKEIN_DISPATCH", "0") in ("1", "true", "yes"),

@@ -76,7 +76,6 @@ def make_app(tmp_path, sso=False, internal=True, admin=True, user_secret=""):
         conn,
         str(tmp_path / "blobs"),
         TOKEN,
-        lambda *a: {},
         qa_chat_upstream="http://chat.test",
         qa_ops_upstream="http://ops.test",
         qa_client=client,
@@ -172,33 +171,6 @@ def test_chat_records_event_in_one_thread(tmp_path):
     conn.close()
 
 
-def test_chat_ticket_is_idempotent_and_staged(tmp_path):
-    app, conn, _ = make_app(tmp_path, sso=True, internal=True, admin=False)
-    headers = {"Cookie": "unisso_sid=sess-ok"}
-    payload = {"thread_id": "s1", "title": "登录坏了", "summary": "点登录没反应"}
-    with TestClient(app) as client:
-        first = client.post("/api/v1/agent/ticket", json=payload, headers=headers)
-        second = client.post("/api/v1/agent/ticket", json=payload, headers=headers)
-    assert first.status_code == 200
-    assert first.json()["status"] == "staged"
-    assert first.json()["existing"] is False
-    assert second.json()["existing"] is True
-    assert first.json()["ticket_id"] == second.json()["ticket_id"]
-    row = conn.execute("SELECT title, status, summary FROM tickets").fetchone()
-    assert row["title"] == "登录坏了"
-    assert row["status"] == "staged"
-    assert "user=u1" in row["summary"]
-    conn.close()
-
-
-def test_chat_ticket_requires_sso(tmp_path):
-    app, conn, _ = make_app(tmp_path)
-    with TestClient(app) as client:
-        response = client.post("/api/v1/agent/ticket", json={"title": "x"})
-    assert response.status_code == 401
-    conn.close()
-
-
 def test_chat_forwards_method_body_and_query(tmp_path):
     app, conn, upstream = make_app(tmp_path)
     with TestClient(app) as client:
@@ -253,7 +225,7 @@ def test_ops_accepts_internal_sso_user(tmp_path):
 def test_disabled_upstream_returns_503(tmp_path):
     conn = db.connect(tmp_path / "none.db")
     db.migrate(conn)
-    app = create_app(conn, str(tmp_path / "b"), TOKEN, lambda *a: {})
+    app = create_app(conn, str(tmp_path / "b"), TOKEN)
     with TestClient(app) as client:
         assert client.get("/api/v1/agent/x").status_code == 503
         assert client.get("/ops/x", headers={"X-Skein-Token": TOKEN}).status_code == 503

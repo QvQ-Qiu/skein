@@ -14,7 +14,7 @@ TOKEN = "stream-token"
 def client(tmp_path):
     conn = db.connect(tmp_path / "stream.db")
     db.migrate(conn)
-    app = create_app(conn, str(tmp_path / "blobs"), TOKEN, lambda *a: {})
+    app = create_app(conn, str(tmp_path / "blobs"), TOKEN)
     with TestClient(app) as c:
         c.conn = conn
         yield c

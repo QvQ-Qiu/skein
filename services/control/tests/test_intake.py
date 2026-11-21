@@ -9,7 +9,7 @@ TOKEN = "intake-token"
 def make_client(tmp_path):
     conn = db.connect(tmp_path / "intake.db")
     db.migrate(conn)
-    app = create_app(conn, str(tmp_path / "b"), TOKEN, lambda *a: {})
+    app = create_app(conn, str(tmp_path / "b"), TOKEN)
     return TestClient(app), conn
 
 

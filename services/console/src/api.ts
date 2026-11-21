@@ -116,7 +116,6 @@ export interface Summary {
   events: { total: number; by_verdict: Record<string, number> };
   threads: number;
   tickets: { total: number; by_status: Record<string, number> };
-  effects: { by_state: Record<string, number> };
   sessions: number;
   runs: { by_status: Record<string, number> };
 }

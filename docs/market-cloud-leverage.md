@@ -31,15 +31,9 @@ YatTerra 的 Pod 自带存储配额（默认 20G），这是 pod worker 唯一�
 
 平台已经注入 `DEPLOY_ID` / `REPORT_URL` / `REPORT_TOKEN`，所以**进度与结果不需要我们自建回调**，直接用平台通道。
 
-但论坛写仍然需要 A 上的中继，因为 pod 没有论坛凭据，也不该有：
+论坛写不经过 Cloud Worker：前厅由小秋 `intake` / `notify` 处理，控制面不再提供 outbox 中继。
 
-```
-POST https://ssemarket.cn/internal/outbox/emit
-Header: X-Skein-Token: <per-job token>
-Body: { "kind": "post|comment|featured", "object": "...", "payload": {...}, "effect_key": "..." }
-```
-
-两者分工：**平台通道报「干到哪了」，Outbox 报「要不要写出去」。** 前者是遥测，后者是写权限。
+两者分工：**平台通道报「干到哪了」，Skein 工单报「要不要写出去」。** 前者是遥测，后者是写权限。
 
 ## 三、Cloud Worker 契约
 

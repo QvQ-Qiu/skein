@@ -20,9 +20,6 @@ def summary(conn: sqlite3.Connection) -> dict:
             "total": conn.execute("SELECT COUNT(*) FROM tickets").fetchone()[0],
             "by_status": _group(conn, "SELECT status, COUNT(*) FROM tickets GROUP BY status"),
         },
-        "effects": {
-            "by_state": _group(conn, "SELECT state, COUNT(*) FROM effects GROUP BY state"),
-        },
         "sessions": conn.execute("SELECT COUNT(*) FROM sessions").fetchone()[0],
         "runs": {
             "by_status": _group(conn, "SELECT status, COUNT(*) FROM runs GROUP BY status"),

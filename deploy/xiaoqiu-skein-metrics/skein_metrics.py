@@ -36,7 +36,7 @@ CREATE INDEX IF NOT EXISTS idx_qms_name_ts ON qdock_metric_samples (name, ts);
 
 ACTIVE_STATES = ("dispatched", "created", "pending")
 STALLED_KINDS = ("dispatch_timeout", "node_offline_with_work")
-FAILED_KINDS = ("run_failed", "effect_failed")
+FAILED_KINDS = ("run_failed",)
 
 
 async def init(dsn: str) -> None:

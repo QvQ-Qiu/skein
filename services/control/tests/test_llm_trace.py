@@ -1,34 +1,9 @@
-import json
-
 from fastapi.testclient import TestClient
 
 from skein import db, llm_trace
 from skein.api import create_app
-from skein.llm_http import HttpLLM
 
 TOKEN = "trace-token"
-
-
-class FakeResponse:
-    def __init__(self, body: dict):
-        self._body = json.dumps(body).encode()
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, *args):
-        return None
-
-    def read(self):
-        return self._body
-
-
-class FakeOpener:
-    def __init__(self, body: dict):
-        self.body = body
-
-    def open(self, request, timeout=None):
-        return FakeResponse(self.body)
 
 
 def test_record_calls_and_sessions(tmp_path):
@@ -78,7 +53,7 @@ def test_record_calls_and_sessions(tmp_path):
 def test_llm_api_requires_token_and_lists(tmp_path):
     conn = db.connect(tmp_path / "api.db")
     db.migrate(conn)
-    app = create_app(conn, str(tmp_path / "b"), TOKEN, lambda *a: {})
+    app = create_app(conn, str(tmp_path / "b"), TOKEN)
     with TestClient(app) as client:
         assert client.get("/internal/llm/sessions").status_code == 401
         created = client.post(
@@ -108,21 +83,3 @@ def test_llm_api_requires_token_and_lists(tmp_path):
     conn.close()
 
 
-def test_http_llm_emits_trace():
-    llm = HttpLLM("http://gateway.test", "key")
-    llm._opener = FakeOpener(
-        {
-            "choices": [{"message": {"content": '{"ok": true}'}}],
-            "usage": {"prompt_tokens": 4, "completion_tokens": 6},
-        }
-    )
-    calls: list[dict] = []
-    llm.on_call = calls.append
-    assert llm.complete({"model": "m1", "messages": [{"role": "user", "content": "hi"}]}) == {
-        "ok": True
-    }
-    assert calls[0]["source"] == "skein"
-    assert calls[0]["model"] == "m1"
-    assert calls[0]["prompt_tokens"] == 4
-    assert calls[0]["completion_tokens"] == 6
-    assert calls[0]["status"] == "ok"

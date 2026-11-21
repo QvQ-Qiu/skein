@@ -11,10 +11,8 @@ import uvicorn
 
 from skein import db, logbuf
 from skein.api import create_app
-from skein.channels import HttpWriter
 from skein.config import Config
 from skein.driver import Driver, parse_schedules
-from skein.llm_http import HttpLLM
 from skein.sso import SsoConfig
 
 
@@ -25,8 +23,6 @@ def build() -> tuple:
     Path(cfg.blob_root).mkdir(parents=True, exist_ok=True)
     conn = db.connect(cfg.db_path)
     db.migrate(conn)
-    writer = HttpWriter(cfg.forum_base, cfg.forum_token)
-    llm = HttpLLM(cfg.llm_base, cfg.llm_key) if cfg.llm_base and cfg.llm_key else None
     sso = SsoConfig(
         base=cfg.sso_base,
         client_id=cfg.sso_client_id,
@@ -37,10 +33,6 @@ def build() -> tuple:
         conn,
         cfg.blob_root,
         cfg.token,
-        writer,
-        llm=llm,
-        direct_model=cfg.direct_model,
-        route_model=cfg.route_model,
         platform_repos=cfg.platform_repos,
         sso_config=sso,
         qa_chat_upstream=cfg.qa_chat_upstream,

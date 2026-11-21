@@ -44,12 +44,6 @@ def signals(
         )
 
     for row in conn.execute(
-        "SELECT key, kind, object FROM effects WHERE state = 'failed'"
-    ):
-        found.append({"kind": "effect_failed", "id": row["key"], "effect_kind": row["kind"],
-                      "object": row["object"]})
-
-    for row in conn.execute(
         "SELECT d.id, d.ticket_id, d.node_id FROM dispatches d"
         " JOIN nodes n ON n.id = d.node_id"
         " WHERE d.state IN ('dispatched', 'created', 'pending')"

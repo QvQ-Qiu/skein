@@ -26,8 +26,6 @@ from skein import db, llm_trace, prompts, runs, store, watchdog
 from skein.admission import Event, decide, policy_for
 from skein.agent import Agent
 from skein.channel import ChannelHub
-from skein.host import RouterHost
-from skein.outbox import EmitResult, Outbox
 from skein.qa_proxy import QAProxy, sign_user_header
 from skein.session_store import SessionStore, TurnConflict
 from skein.sso import (
@@ -49,10 +47,6 @@ from skein.ui_api import create_ui_router, ticket_rows
 log = logging.getLogger("skein.api")
 
 
-class ChatIn(BaseModel):
-    messages: list[dict]
-
-
 class TurnIn(BaseModel):
     session_id: str
     turn_index: int = Field(ge=0)
@@ -61,25 +55,8 @@ class TurnIn(BaseModel):
     branch: str | None = None
 
 
-class EmitIn(BaseModel):
-    key: str
-    kind: str
-    object: str
-    payload: dict = Field(default_factory=dict)
-
-
 class ReviewIn(BaseModel):
     decision: str
-
-
-class RunIn(BaseModel):
-    job: str
-    day: str
-
-
-class FinishIn(BaseModel):
-    status: str
-    detail: str | None = None
 
 
 class PromptProposeIn(BaseModel):
@@ -94,13 +71,6 @@ class PromptActionIn(BaseModel):
     part: str
 
 
-class FollowupIn(BaseModel):
-    thread_id: str
-    source: str = ""
-    origin_id: str = ""
-    text: str = ""
-
-
 class LoginIn(BaseModel):
     email: str
     password: str
@@ -111,27 +81,12 @@ class LoginIn(BaseModel):
 QA_METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"]
 
 
-class TriggerIn(BaseModel):
-    source: str
-    origin_id: str
-    text: str = ""
-    actor: str | None = None
-    mentioned: bool = False
-    parent_id: str | None = None
-
-
 class TicketIn(BaseModel):
     title: str
     summary: str = ""
     platform: str = ""
     dedup_key: str = ""
     dispatch: bool = False
-
-
-class ChatTicketIn(BaseModel):
-    thread_id: str = ""
-    title: str
-    summary: str = ""
 
 
 class LLMCallIn(BaseModel):
@@ -171,10 +126,6 @@ def create_app(
     conn: sqlite3.Connection,
     blob_root: str,
     token: str,
-    writer,
-    llm=None,
-    direct_model: str = "direct",
-    route_model: str = "route",
     platform_repos: dict[str, str] | None = None,
     sso_config: SsoConfig | None = None,
     sso_client: Any | None = None,
@@ -191,8 +142,6 @@ def create_app(
 ) -> FastAPI:
     app = FastAPI(title="skein-control", version="0.1.0")
     sessions = SessionStore(conn, blob_root)
-    outbox = Outbox(conn, writer)
-    host = RouterHost(conn, llm, direct_model, route_model) if llm is not None else None
     hub = ChannelHub(conn, token, platform_repos or {})
     agent = (
         Agent(conn, llm_base, llm_key, agent_model, hub)
@@ -214,8 +163,6 @@ def create_app(
     )
     login_attempts: dict[str, deque[float]] = defaultdict(deque)
     user_secret = qa_user_secret
-    if llm is not None:
-        llm.on_call = lambda call: llm_trace.record(conn, **call)
 
     def notify_public(ticket_id: str, status: str) -> None:
         row = conn.execute(
@@ -495,61 +442,6 @@ def create_app(
             decision.verdict.value,
         )
 
-    @app.post("/api/v1/agent/ticket")
-    async def chat_ticket(body: ChatTicketIn, request: Request) -> dict:
-        """集市用户从对话里显式转工单；只建 staged，不自动派工。"""
-        principal = await chat_principal(request)
-        if principal is None:
-            raise HTTPException(status_code=401, detail="unauthorized")
-        title = body.title.strip()[:120]
-        if not title:
-            raise HTTPException(status_code=400, detail="title_required")
-        summary = body.summary.strip()[:2000]
-        thread_key = body.thread_id.strip()[:128] or f"user:{principal.sub}"
-        digest = hashlib.sha256(
-            f"{principal.sub}|{thread_key}|{title}|{summary}".encode()
-        ).hexdigest()[:32]
-        dedup_key = f"chat:{digest}"
-        existing = store.find_ticket_by_dedup(conn, dedup_key)
-        if existing:
-            row = conn.execute(
-                "SELECT code, status FROM tickets WHERE id = ?", (existing,)
-            ).fetchone()
-            return {
-                "ticket_id": existing,
-                "code": row["code"] if row else "",
-                "status": row["status"] if row else "",
-                "existing": True,
-            }
-        event = Event(
-            source="chat",
-            origin_id=thread_key,
-            text=summary or title,
-            actor=principal.sub,
-            parent_id=thread_key,
-        )
-        thread_origin, thread_id_key = store.thread_identity(event)
-        thread_id = store.ensure_thread(conn, thread_origin, thread_id_key)
-        note = f"{summary}\n\n[chat] user={principal.sub} thread={thread_key}".strip()
-        ticket_id = store.create_ticket(
-            conn, title, thread_id=thread_id, dedup_key=dedup_key, summary=note
-        )
-        db.record_audit(
-            conn,
-            principal.label,
-            "chat.ticket",
-            {"ticket_id": ticket_id, "thread_id": thread_key},
-        )
-        row = conn.execute(
-            "SELECT code, status FROM tickets WHERE id = ?", (ticket_id,)
-        ).fetchone()
-        return {
-            "ticket_id": ticket_id,
-            "code": row["code"] if row else "",
-            "status": row["status"] if row else "",
-            "existing": False,
-        }
-
     @app.api_route("/api/v1/agent/{path:path}", methods=QA_METHODS)
     async def qa_chat_agent(path: str, request: Request) -> StreamingResponse:
         """小秋 chat 面：集市用户/管理员都可；身份头优先，JWT 兜底。"""
@@ -634,16 +526,6 @@ def create_app(
             (key,),
         ).fetchall()
         return {"thread_id": key, "actor": principal.sub, "messages": [dict(row) for row in rows]}
-
-    @app.post("/internal/runs", dependencies=[Depends(auth)])
-    def start_run(body: RunIn) -> dict:
-        run_id = runs.start(conn, body.job, body.day)
-        return {"run_id": run_id, "existing": run_id is None}
-
-    @app.post("/internal/runs/{run_id}/finish", dependencies=[Depends(auth)])
-    def finish_run(run_id: str, body: FinishIn) -> dict:
-        runs.finish(conn, run_id, body.status, body.detail)
-        return {"run_id": run_id, "status": body.status}
 
     @app.get("/internal/runs", dependencies=[Depends(auth)])
     def list_runs(limit: int = 20) -> dict:
@@ -843,11 +725,6 @@ def create_app(
         prompts.unfreeze(conn, body.part)
         return prompts.state(conn, body.part)
 
-    @app.post("/internal/events/followup", dependencies=[Depends(auth)])
-    async def followup(body: FollowupIn) -> dict:
-        forwarded = await hub.followup(body.thread_id, body.model_dump())
-        return {"forwarded": forwarded}
-
     @app.post("/internal/tickets/{ticket_id}/cancel", dependencies=[Depends(auth)])
     async def cancel_ticket(ticket_id: str) -> dict:
         if not await hub.cancel_ticket(ticket_id):
@@ -910,39 +787,6 @@ def create_app(
         notify_public(ticket_id, status)
         return {"ticket_id": ticket_id, "status": status}
 
-    @app.post("/internal/trigger", dependencies=[Depends(auth)])
-    def trigger(body: TriggerIn) -> dict:
-        event = Event(
-            source=body.source,
-            origin_id=body.origin_id,
-            text=body.text,
-            actor=body.actor,
-            mentioned=body.mentioned,
-            parent_id=body.parent_id,
-        )
-        if host is not None:
-            result = host.on_event(event)
-            return {"action": result.action, "ticket_id": result.ticket_id}
-        decision = decide(event)
-        thread_origin, thread_key = store.thread_identity(event)
-        thread_id = store.ensure_thread(conn, thread_origin, thread_key)
-        store.record_event(
-            conn,
-            event.source,
-            event.origin_id,
-            thread_id,
-            {"text": event.text, "actor": event.actor},
-            decision.verdict.value,
-        )
-        return {"action": decision.verdict.value, "thread_id": thread_id}
-
-    if host is not None:
-
-        @app.post("/internal/chat", dependencies=[Depends(auth)])
-        def chat(body: ChatIn) -> dict:
-            result = host.chat(body.messages)
-            return {"action": result.action, "text": result.text, "ticket_id": result.ticket_id}
-
     @app.post("/internal/worker/turn", dependencies=[Depends(auth)])
     def upload_turn(body: TurnIn) -> dict:
         try:
@@ -957,13 +801,6 @@ def create_app(
         except TurnConflict as exc:
             raise HTTPException(status_code=409, detail=str(exc))
         return {"session_id": turn.session_id, "turn_index": turn.turn_index, "sha256": turn.sha256}
-
-    @app.post("/internal/outbox/emit", dependencies=[Depends(auth)])
-    def emit(body: EmitIn) -> dict:
-        result = outbox.emit(body.key, body.kind, body.object, body.payload)
-        if result == EmitResult.FAILED:
-            raise HTTPException(status_code=502, detail="effect failed")
-        return {"result": result}
 
     console_root = Path(__file__).resolve().parents[3] / "console"
     dist_dir = console_root / "dist"

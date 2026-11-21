@@ -84,16 +84,6 @@ CREATE TABLE IF NOT EXISTS runs (
     UNIQUE (job, day)
 );
 
-CREATE TABLE IF NOT EXISTS effects (
-    key         TEXT PRIMARY KEY,
-    kind        TEXT NOT NULL,
-    object      TEXT NOT NULL,
-    state       TEXT NOT NULL DEFAULT 'started',
-    response    TEXT,
-    created_at  REAL NOT NULL,
-    updated_at  REAL NOT NULL
-);
-
 CREATE TABLE IF NOT EXISTS prompt_revisions (
     id            INTEGER PRIMARY KEY AUTOINCREMENT,
     part          TEXT NOT NULL,

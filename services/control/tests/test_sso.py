@@ -70,7 +70,6 @@ def sso_env(tmp_path):
         conn,
         str(tmp_path / "blobs"),
         TOKEN,
-        lambda *a: {},
         sso_config=SsoConfig(client_id="c", client_secret="s"),
         sso_client=client,
     )
@@ -102,7 +101,7 @@ def add_external_user(env) -> None:
 def test_token_mode_when_sso_absent(tmp_path):
     conn = db.connect(tmp_path / "none.db")
     db.migrate(conn)
-    app = create_app(conn, str(tmp_path / "b"), TOKEN, lambda *a: {})
+    app = create_app(conn, str(tmp_path / "b"), TOKEN)
     with TestClient(app) as client:
         assert client.get("/api/session").json() == {"mode": "token"}
     conn.close()

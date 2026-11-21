@@ -83,8 +83,6 @@ def signal_ticket(signal: dict) -> tuple[str, str]:
         title = f"[自维护] 派单超时：工单 {signal.get('ticket_id')} @ 节点 {signal.get('node_id')}"
     elif kind == "run_failed":
         title = f"[自维护] 作业失败：{signal.get('job')} {signal.get('day')}"
-    elif kind == "effect_failed":
-        title = f"[自维护] 写回失败：{signal.get('effect_kind')} {signal.get('object')}"
     elif kind == "node_offline_with_work":
         title = (
             "[自维护] 节点离线且有在途工单："

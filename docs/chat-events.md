@@ -25,8 +25,6 @@
 - 事件在控制台「运行 → 事件」可见；Thread 的 `origin=chat`。
 - bootstrap / close / resume 不算任务，不记账。
 
-聊天里显式转工单仍可用 `POST /api/v1/agent/ticket`（任意集市用户 + SSO），只建 `staged` 单，不自动派工。
-
 ### 1.2 论坛前厅（闭环型）
 
 小秋 chat 容器里的 `frontdesk` monitor 每 60 秒轮询论坛最近 10 分钟的帖子和评论：

@@ -10,7 +10,7 @@ SQLite `llm_calls`（schema v8）：
 | --- | --- |
 | `session_id` | 聊天 thread_id / 业务会话 ID |
 | `actor` | unisso `sub`（小秋回报时带） |
-| `source` | `skein` / `skein-agent` / `chat` / `ops` / `frontdesk` |
+| `source` | `skein-agent` / `chat` / `ops` / `frontdesk` |
 | `model` | 模型名 |
 | `prompt` / `response` | 截断到 16k 字符 |
 | `prompt_tokens` / `completion_tokens` | 网关或 LangChain 返回的用量；没有就 0 |
@@ -20,7 +20,6 @@ SQLite `llm_calls`（schema v8）：
 
 ## 2. 谁在写
 
-- **Skein 自己**：`HttpLLM`（Router / 直答）每次补全自动写，`source=skein`。
 - **控制台 Agent**：`skein-agent`，管理员对话的规划与总结各记一次。
 - **小秋 chat / ops**：`app/observability/skein_trace.py` 的 LangChain 回调，按 thread_id 归组，`source=chat` / `ops`，`actor=unisso sub`；不再发 Langfuse。
 - **小秋前厅 monitor**：论坛分类每次调 DeepSeek 都写，`source=frontdesk`，会话 `forum:post:<id>` / `forum:comment:<id>`；建单失败也留痕。
@@ -64,7 +63,7 @@ SQLite `llm_calls`（schema v8）：
 - 生产 settings 从容器里取出，只替换 `llm` / `ops_llm` 段，存
   `/etc/skein/xiaoqiu-chat-settings.yaml` 与 `/etc/skein/xiaoqiu-ops-settings.yaml`，
   容器以只读挂载覆盖镜像内配置。
-- 镜像：chat `xiaoqiu:1.0.103-skein-frontdesk`（含前厅 monitor），ops `xiaoqiu:1.0.100-skein-trace`。
+- 镜像：chat `xiaoqiu:1.0.104-skein-frontdesk`（含前厅 monitor），ops `xiaoqiu:1.0.100-skein-trace`。
 - Langfuse env、回调、ops 的 `langfuse_trace` 工具与 `lftrace` 模块已移除。
 - 烟测：chat 任务 200（qwen 失败后 DeepSeek 接管）；Agent 规划 4 个工具并输出中文结论；
   论坛前厅 `SK-6E4BFA9E` 全链闭环；测试产生的 `llm_calls` 已清理。

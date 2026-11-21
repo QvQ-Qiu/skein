@@ -73,21 +73,6 @@ def test_foreign_keys_are_enforced(conn):
         )
 
 
-def test_effects_are_single_use(conn):
-    t = db.now()
-    conn.execute(
-        "INSERT INTO effects (key, kind, object, state, created_at, updated_at)"
-        " VALUES (?, ?, ?, ?, ?, ?)",
-        ("run:daily:2026-11-18", "post", "day:2026-11-18", "started", t, t),
-    )
-    with pytest.raises(sqlite3.IntegrityError):
-        conn.execute(
-            "INSERT INTO effects (key, kind, object, state, created_at, updated_at)"
-            " VALUES (?, ?, ?, ?, ?, ?)",
-            ("run:daily:2026-11-18", "post", "day:2026-11-18", "started", t, t),
-        )
-
-
 def test_runs_unique_per_job_and_day(conn):
     t = db.now()
     conn.execute(

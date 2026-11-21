@@ -66,7 +66,7 @@ const stalled = computed(() =>
   ),
 );
 const failures = computed(() =>
-  signals.value.filter((item) => ["run_failed", "effect_failed"].includes(item.kind)),
+  signals.value.filter((item) => item.kind === "run_failed"),
 );
 const topSignals = computed(() => stalled.value.concat(failures.value).slice(0, 5));
 
@@ -169,8 +169,6 @@ function signalText(signal: Signal): string {
       return `派单超时：工单 ${signal.ticket_id} 在节点 ${signal.node_id} 已等待 ${Math.round((signal.age_s ?? 0) / 60)} 分钟`;
     case "run_failed":
       return `作业失败：${signal.job} ${signal.day}`;
-    case "effect_failed":
-      return `写回失败：${signal.effect_kind} ${signal.object}`;
     case "node_offline_with_work":
       return `节点离线且有在途工单：${signal.node_id} / 工单 ${signal.ticket_id}`;
     default:

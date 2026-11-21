@@ -13,7 +13,7 @@ import time
 from fastapi import WebSocket
 from starlette.websockets import WebSocketDisconnect
 
-from skein import db, scheduler, store
+from skein import db, scheduler
 
 log = logging.getLogger("skein.channel")
 
@@ -207,33 +207,6 @@ class ChannelHub:
             }
         )
         return {"ok": True, "dispatch_id": dispatch_id, "worker_id": worker_id, "node_id": node_id}
-
-    async def followup(self, thread_id: str, event: dict) -> bool:
-        """把同一 Thread 的后续事件直接推给已订阅的 worker；失败由调用方回退。"""
-        sub = store.active_subscription(self._conn, thread_id)
-        if not sub or not sub.get("worker_id") or not sub.get("node_id"):
-            return False
-        ws = self._sockets.get(str(sub["node_id"]))
-        if ws is None:
-            return False
-        await ws.send_json(
-            {
-                "t": "dispatch",
-                "worker_id": sub["worker_id"],
-                "followup": True,
-                "ticket": {
-                    "id": sub["ticket_id"],
-                    "code": sub.get("code") or "FOLLOWUP",
-                    "title": str(event.get("text") or "")[:200],
-                    "platform": "",
-                    "kind": "followup",
-                    "severity": "normal",
-                    "summary": "",
-                    "source_url": "",
-                },
-            }
-        )
-        return True
 
     async def cancel_ticket(self, ticket_id: str) -> bool:
         """向节点发 cancel，并把派工与工单状态落回可重派。"""

@@ -39,19 +39,14 @@ def test_dispatch_timeout_is_reported(conn):
     assert found[0]["ticket_id"] == ticket
 
 
-def test_failed_run_and_effect_are_reported(conn):
+def test_failed_run_is_reported(conn):
     now = time.time()
     conn.execute(
         "INSERT INTO runs (id, job, day, status, started_at) VALUES ('r1', 'daily', '2026-11-18', 'failed', ?)",
         (now,),
     )
-    conn.execute(
-        "INSERT INTO effects (key, kind, object, state, created_at, updated_at)"
-        " VALUES ('e1', 'post', 'o', 'failed', ?, ?)",
-        (now, now),
-    )
     kinds = {s["kind"] for s in watchdog.signals(conn)}
-    assert kinds == {"run_failed", "effect_failed"}
+    assert kinds == {"run_failed"}
 
 
 def test_offline_node_with_work(conn):

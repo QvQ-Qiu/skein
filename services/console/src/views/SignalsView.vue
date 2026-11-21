@@ -22,7 +22,6 @@ interface SignalGroup {
 const GROUP_ORDER = [
   "dispatch_timeout",
   "run_failed",
-  "effect_failed",
   "node_offline_with_work",
 ] as const;
 
@@ -84,7 +83,7 @@ function kindOf(signal: Signal): string {
 
 function toneOf(kind: string): "bad" | "warn" | "muted" {
   if (kind === "dispatch_timeout") return "warn";
-  if (kind === "run_failed" || kind === "effect_failed" || kind === "node_offline_with_work") {
+  if (kind === "run_failed" || kind === "node_offline_with_work") {
     return "bad";
   }
   return "muted";
@@ -96,8 +95,6 @@ function titleOf(kind: string): string {
       return "派单超时";
     case "run_failed":
       return "作业失败";
-    case "effect_failed":
-      return "写回失败";
     case "node_offline_with_work":
       return "节点离线但有在途工单";
     default:
@@ -118,11 +115,6 @@ function fieldsOf(signal: Signal): SignalField[] {
         field("job", signal.job, true),
         field("day", signal.day, true),
         field("detail", signal.detail, false, true),
-      ];
-    case "effect_failed":
-      return [
-        field("effect_kind", signal.effect_kind, true),
-        field("object", signal.object, true, true),
       ];
     case "node_offline_with_work":
       return [field("node_id", signal.node_id, true), field("ticket_id", signal.ticket_id, true)];

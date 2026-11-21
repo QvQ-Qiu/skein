@@ -5,7 +5,6 @@ from fastapi.testclient import TestClient
 
 from skein import db
 from skein.api import create_app
-from skein.outbox import EmitResult
 
 TOKEN = "test-token"
 
@@ -14,15 +13,8 @@ TOKEN = "test-token"
 def client(tmp_path):
     conn = db.connect(tmp_path / "api.db")
     db.migrate(conn)
-    calls = []
-
-    def writer(kind, object_, payload):
-        calls.append((kind, object_))
-        return {"ok": True}
-
-    app = create_app(conn, str(tmp_path / "blobs"), TOKEN, writer)
+    app = create_app(conn, str(tmp_path / "blobs"), TOKEN)
     with TestClient(app) as c:
-        c.calls = calls
         yield c
     conn.close()
 
@@ -55,98 +47,8 @@ def test_turn_rejects_bad_base64(client):
     assert client.post("/internal/worker/turn", json=body, headers=auth()).status_code == 400
 
 
-def test_emit_is_single_write(client):
-    body = {"key": "k1", "kind": "post", "object": "day:1", "payload": {}}
-    first = client.post("/internal/outbox/emit", json=body, headers=auth())
-    assert first.status_code == 200
-    assert first.json()["result"] == EmitResult.SENT
-    second = client.post("/internal/outbox/emit", json=body, headers=auth())
-    assert second.json()["result"] == EmitResult.ALREADY
-    assert len(client.calls) == 1
-
-
-class FakeLLM:
-    def __init__(self, response):
-        self.response = response
-        self.requests = []
-
-    def complete(self, request):
-        self.requests.append(request)
-        return self.response
-
-
-def make_chat_client(tmp_path, response):
-    conn = db.connect(tmp_path / "chat.db")
-    db.migrate(conn)
-    app = create_app(
-        conn, str(tmp_path / "blobs"), TOKEN, lambda *a: {}, llm=FakeLLM(response)
-    )
-    return TestClient(app), conn
-
-
-def test_chat_say(tmp_path):
-    client, conn = make_chat_client(tmp_path, {"action": "say", "text": "你好"})
-    with client:
-        response = client.post(
-            "/internal/chat",
-            json={"messages": [{"role": "user", "content": "在吗"}]},
-            headers=auth(),
-        )
-        assert response.json() == {"action": "say", "text": "你好", "ticket_id": None}
-    conn.close()
-
-
-def test_chat_dispatch_creates_ticket(tmp_path):
-    client, conn = make_chat_client(tmp_path, {"action": "dispatch"})
-    with client:
-        response = client.post(
-            "/internal/chat",
-            json={"messages": [{"role": "user", "content": "帮我修个 bug"}]},
-            headers=auth(),
-        )
-        assert response.json()["action"] == "dispatch"
-        assert response.json()["ticket_id"]
-        assert conn.execute("SELECT COUNT(*) AS n FROM tickets").fetchone()["n"] == 1
-    conn.close()
-
-
 def test_summary_requires_auth(client):
     assert client.get("/internal/summary").status_code == 401
-
-
-def test_trigger_without_model_records_event(client):
-    response = client.post(
-        "/internal/trigger",
-        json={"source": "im", "origin_id": "m1", "text": "帮忙看看", "mentioned": True},
-        headers=auth(),
-    )
-    assert response.status_code == 200
-    assert response.json()["action"] == "process"
-
-
-def test_trigger_with_router_creates_ticket(tmp_path):
-    client, conn = make_chat_client(tmp_path, {"action": "route"})
-    with client:
-        response = client.post(
-            "/internal/trigger",
-            json={"source": "im", "origin_id": "m2", "text": "帮忙修一下", "mentioned": True},
-            headers=auth(),
-        )
-        assert response.json()["action"] == "dispatch"
-        assert conn.execute("SELECT COUNT(*) FROM tickets").fetchone()[0] == 1
-        assert conn.execute("SELECT COUNT(*) FROM events").fetchone()[0] == 1
-    conn.close()
-
-
-def test_summary_reflects_writes(client):
-    client.post(
-        "/internal/outbox/emit",
-        json={"key": "k9", "kind": "post", "object": "o9", "payload": {}},
-        headers=auth(),
-    )
-    body = client.get("/internal/summary", headers=auth()).json()
-    assert body["effects"]["by_state"]["confirmed"] == 1
-    assert body["events"]["total"] == 0
 
 
 def test_prompt_propose_promote_conflict(client):
@@ -183,17 +85,3 @@ def test_prompt_freezes_after_two_rollbacks(client):
     assert client.post(
         "/internal/prompts/unfreeze", json={"part": part}, headers=auth()
     ).status_code == 200
-
-
-def test_emit_requires_forum_config(tmp_path):
-    conn = db.connect(tmp_path / "api-no-forum.db")
-    db.migrate(conn)
-    app = create_app(conn, str(tmp_path / "blobs"), TOKEN, lambda *args: {"ok": True})
-    with TestClient(app) as client:
-        response = client.post(
-            "/internal/outbox/emit",
-            json={"key": "k1", "kind": "post", "object": "day:1", "payload": {}},
-            headers=auth(),
-        )
-        assert response.status_code == 200
-    conn.close()

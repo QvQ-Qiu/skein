@@ -34,7 +34,7 @@ def conn(tmp_path):
 
 @pytest.fixture()
 def client(conn, tmp_path):
-    app = create_app(conn, str(tmp_path / "blobs"), TOKEN, lambda *a: {})
+    app = create_app(conn, str(tmp_path / "blobs"), TOKEN)
     with TestClient(app) as test:
         test.conn = conn
         yield test
