@@ -17,13 +17,11 @@ from skein.ui_api import ticket_rows
 
 log = logging.getLogger("skein.agent")
 
-SYSTEM = """你是雁阵（Skein）控制台 Agent，服务对象是维护者/管理员。
+PLAN_SYSTEM = """你是雁阵（Skein）控制台 Agent 的规划器，服务对象是维护者/管理员。
 规则：
-- 中文，先结论后依据，简洁。
-- 查工单/节点/运行/信号/模型调用用工具；不要编造。
-- 只有管理员明确要求时才 dispatch/cancel；不自动合入、不自动验收、不删资源。
-- 工单状态以工具结果为准；不确定就问，不要猜。
-- 涉及代码执行的建议，用「工单/工伴」描述，不假装自己改了代码。
+- 只读为主；只有管理员明确要求时才选择 dispatch/cancel。
+- 不自动合入、不自动验收、不删资源。
+- 不确定就不调用工具。
 
 可用工具：
 - summary()：雁阵概览
@@ -36,9 +34,14 @@ SYSTEM = """你是雁阵（Skein）控制台 Agent，服务对象是维护者/�
 - dispatch_ticket(ticket_id, platform?)：派工（仅明确要求）
 - cancel_ticket(ticket_id)：取消派工（仅明确要求）
 
-只输出一个 JSON 对象，不要 Markdown、不要解释：
-工具调用：{"action":"tool","tool":"工具名","args":{...}}
-最终回答：{"action":"final","content":"给管理员看的回答"}
+只输出一个 JSON 对象，不要 Markdown、不要解释、不要输出工具结果：
+{"tools":[{"name":"工具名","args":{...}}]}
+不需要工具就输出：{"tools":[]}
+"""
+
+FINAL_SYSTEM = """你是雁阵（Skein）控制台 Agent，服务对象是维护者/管理员。
+根据给出的工具结果，用中文简洁回答：先结论后依据，不编造，不确定就说不知道。
+不要输出 JSON、工具调用或原始工具结果；不要假装自己改了代码。
 """
 
 MAX_TOOL_RESULT = 8000
@@ -83,6 +86,16 @@ def _parse_action(text: str) -> dict | None:
     return data if isinstance(data, dict) else None
 
 
+def _parse_plan(text: str) -> list[dict]:
+    data = _parse_action(text) or {}
+    items = data.get("tools")
+    if isinstance(items, list):
+        return [item for item in items if isinstance(item, dict)]
+    if data.get("tool"):
+        return [{"name": data.get("tool"), "args": data.get("args") or {}}]
+    return []
+
+
 class Agent:
     def __init__(
         self,
@@ -105,49 +118,54 @@ class Agent:
     async def chat(self, principal: Any, thread_id: str, message: str) -> dict:
         history = self._history(thread_id)
         self._save(thread_id, "user", message)
-        messages: list[dict] = [
-            {"role": "system", "content": SYSTEM},
-            *[{"role": item["role"], "content": item["content"]} for item in history],
+        history_messages = [
+            {"role": item["role"], "content": item["content"]} for item in history
+        ]
+        plan_messages = [
+            {"role": "system", "content": PLAN_SYSTEM},
+            *history_messages,
             {"role": "user", "content": message},
         ]
+        plan = await self._llm(principal, thread_id, plan_messages)
+        actions = _parse_plan(str(plan.get("content") or "")) if plan else []
         tools_used: list[str] = []
-        for _ in range(6):
-            reply = await self._llm(principal, thread_id, messages)
-            if reply is None:
-                content = "模型调用失败，稍后再试。"
-                self._save(thread_id, "assistant", content)
-                return {"reply": content, "tools": tools_used}
-            content = str(reply.get("content") or "").strip()
-            messages.append({"role": "assistant", "content": content})
-            action = _parse_action(content)
-            if action is None:
-                final = content or "我查完了，但模型没有给出总结。"
-                self._save(thread_id, "assistant", final)
-                return {"reply": final, "tools": tools_used}
-            kind = str(action.get("action") or "")
-            if not kind:
-                kind = "tool" if action.get("tool") else "final"
-            if kind != "tool":
-                final = str(action.get("content") or content).strip()
-                if not final:
-                    final = "我查完了，但模型没有给出总结。"
-                self._save(thread_id, "assistant", final)
-                return {"reply": final, "tools": tools_used}
-            name = str(action.get("tool") or "")
+        results: list[dict] = []
+        for action in actions[:4]:
+            name = str(action.get("name") or action.get("tool") or "")
             args = action.get("args") or {}
             if not isinstance(args, dict):
                 args = {}
             result = await self._tool(name, args, principal)
             tools_used.append(name)
-            messages.append(
+            results.append({"tool": name, "result": result})
+
+        final_messages = [
+            {"role": "system", "content": FINAL_SYSTEM},
+            *history_messages,
+            {"role": "user", "content": message},
+        ]
+        if results:
+            final_messages.append(
                 {
                     "role": "user",
-                    "content": f"工具结果（{name}）：{_clip(result)}",
+                    "content": "工具结果（已执行）：\n"
+                    + _clip(json.dumps(results, ensure_ascii=False), 12000),
                 }
             )
-        content = "这轮工具调用太长了，请把问题拆小一点再问。"
-        self._save(thread_id, "assistant", content)
-        return {"reply": content, "tools": tools_used}
+        else:
+            final_messages.append(
+                {
+                    "role": "user",
+                    "content": "本轮没有调用工具；如果问题需要实时数据，请说明需要什么信息。",
+                }
+            )
+        final = await self._llm(principal, thread_id, final_messages)
+        if final is None:
+            reply = "模型调用失败，稍后再试。"
+        else:
+            reply = str(final.get("content") or "").strip() or "我没查到可总结的内容。"
+        self._save(thread_id, "assistant", reply)
+        return {"reply": reply, "tools": tools_used}
 
     async def _llm(
         self, principal: Any, thread_id: str, messages: list[dict]
