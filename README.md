@@ -4,18 +4,20 @@ Super-agent 的调度与执行平台。
 
 中文名「雁阵」——雁群飞行时排成的队形，英文正是 **skein**；skein 同时指「一绞线」，对应本架构里的核心概念 **Thread**。
 
+生产控制台：**https://skein.ssemarket.cn/console/**。接手先读 [HANDOVER.md](HANDOVER.md)。
+
 ## 架构
 
 目的四个：**连续、高效、主动、持久**。
 
-手段五个：双层架构（Router / Worker）、事件驱动（Trigger / Thread / 订阅直通）、面向人的交互、计算与状态分离、外部 Watchdog。
+手段四个：工单/事件驱动、节点/工雁执行、面向人的控制台与 Agent、外部 Watchdog。
 
 三份权威各管一处，互不合并：
 
 | 权威 | 内容 | 位置 |
 | --- | --- | --- |
 | Session | transcript、轮次、会话指针 | 索引行 + 内容寻址文件 |
-| 领域 | 工单、Thread、订阅、提示词修订、审计 | SQLite |
+| 领域 | 工单、Thread、提示词修订、审计 | SQLite |
 | 论坛 | 帖、评论、加精 | 论坛 MySQL |
 
 完整设计见 [docs/architecture.md](docs/architecture.md)。

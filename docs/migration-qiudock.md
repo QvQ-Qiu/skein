@@ -14,8 +14,8 @@
 - 小秋 chat/ops 的 `QDOCK_*` 与 `LANGFUSE_*` 已移除；模型池直连
   `https://api.ssemarket.cn/v1` + `qwen-3.8-flash`（详见 `docs/llm-trace.md`）。
 - 备份只保留 `/root/decommission-20261121/README.txt`（无密钥）；秋坞已无回滚密钥。
-- 未完成：旧雁阵 `yanzhen` / `yanzhen-node` systemd 仍 active；2026-11-21 16:07
-  Skein ingest 是关闭秋坞后的第一次真跑，待核验。
+- 旧雁阵 `yanzhen` / `yanzhen-node` 已停止并 disable；16:07 Skein ingest 真跑成功（16:07 行 succeeded）。
+- 2026-11-21 晚最终收口：小秋 ops 面/容器/旧表、qdock 代码沙箱与 evals、198M 旧源码树、旧镜像/密钥副本全部清理；详见 `HANDOVER.md`。
 
 
 ## 1. 秋坞现在有什么（实测）

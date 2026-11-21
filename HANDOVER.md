@@ -1,198 +1,143 @@
 # Skein 交接文档
 
-> 2026-11-19 · 给接手的人：先读这一份，再按需读 `docs/product.md`、`docs/p2.md`、`docs/deployment.md`。
->
-> **历史文档（2026-11-21 更新）**：旧 P0/P2 Router、`host.py`、`router/`、Outbox 与相关预留接口已删除；
-> 当前模块、接口和环境变量以 `docs/control-plane.md` 为准。本文第 7、8 节仅作历史记录。
+> 2026-11-21 · 当前生产：**https://skein.ssemarket.cn/console/**（根路径 302 到 console）
+> 小秋只保留 chat + 论坛前厅；ops 面、秋坞、旧雁阵 yanzhen 均已下线。
 
-## 1. 这是什么
+## 1. 一分钟版本
 
-**Skein（雁阵）：把真实用户反馈，变成可验收的修复。**
+Skein 是集市论坛的 Super-agent 控制面：论坛吐槽/反馈 → 小秋前厅建单 → 管理员验收 →
+工雁在节点 worktree 修复 → 原帖回写。**验收和合入永远由人做，不自动合入。**
 
-小团队维护者用的 Super-agent 控制台：论坛帖/评论/群消息进入事件流，程序层准入后生成工单，派给节点上的 Claude Code 会话执行，交付后由人验收。**不自动合入、不自动部署。**
+当前分工：
 
-产品定义见 `docs/product.md`。四个工作面：
+- **Skein 控制面**：工单、派工、节点、定时作业、Watchdog、控制台、内置 Agent。
+- **小秋 chat**：`/api/v1/agent/*`、`/task/*` 的对话/知识库助手。
+- **小秋前厅**：轮询论坛帖/评论/楼中楼，回执、`intake` 建单、`notify` 原帖回写。
+- **Go 主站**：论坛 API + 小秋机器人回帖内部端点。
+
+## 2. 仓库与服务器
+
+| 组件 | 仓库 | 服务器路径 |
+| --- | --- | --- |
+| Skein | `github.com/QvQ-Qiu/skein`，主分支 `main` | `/root/skein` |
+| 小秋 | `gitee.com/QvQ-Qiu/xiaoqiu`，主分支 `main` | 裸仓 `/root/git/xiaoqiu.git`；构建源 `/root/xiaoqiu-build` |
+| Go 主站 | `gitee.com/yang-peiyue/SSE_market_server`，分支 `online` | `/root/SSE_Market/SSE_market_server` |
+
+Skein 仓结构：
 
 ```text
-工作台  现在要我做什么（待验收 / 卡住 / 正在跑）
-需求    工单列表、详情、派发、验收
-运行    总览拓扑、节点、Worker 会话、事件、信号
-平台    准入矩阵、提示词、运行记录、审计、日志
+services/control/     FastAPI 控制面 + SQLite 领域库
+services/node-agent/  节点 daemon（反向拨入、worktree、Claude Code）
+services/console/     Vue 3 控制台（构建产物 dist/）
+deploy/               systemd/env/验收脚本
+docs/                 当前文档
 ```
 
-## 2. 代码结构
+## 3. 生产拓扑
 
 ```text
-services/
-  control/      Python 控制面（FastAPI + SQLite 领域库 + Session 权威 + Outbox）
-  node-agent/   Node 节点 daemon（反向拨入、worktree、Claude Code、transcript 同步）
-  console/      Vue 3 + Vite + naive-ui 控制台
-    src/        源码
-    dist/       构建产物（gitignore；部署包会带上）
-    legacy/     旧静态页，挂在 /console-legacy
-  console/web/  旧雁阵 Vue 前端，仅作视觉参考，不接新接口
-legacy/
-  dispatcher/   旧 Node 雁阵调度器，生产仍在 /root/yanzhen 跑
-deploy/
-  scripts/      migrate_yanzhen.py、console-smoke.mjs
-  p0/           P0 只读演练：env、systemd、打包脚本
-docs/
-  product.md    产品定位
-  architecture.md / p2.md / deployment.md / p0-deploy.md
+浏览器 ── https://skein.ssemarket.cn/console/ ── nginx ── 控制面 172.17.0.1:7800
+                                                       │
+                                                       ├─ 小秋 chat 127.0.0.1:8119
+                                                       ├─ Go 主站 127.0.0.1:8080
+                                                       └─ 节点 WebSocket /api/agent/channel
+节点 n-cloud-skein（集市云，平台 forum/skein，2 worker）
 ```
 
-## 3. 当前状态
+- 控制台登录走 UniSSO：`password/verify` + 共享会话 Cookie；控制台要求 `is_admin=1`。
+- 当前在线执行节点只有 `n-cloud-skein`；旧的 `n-market-host` 已移除。
+- `skein-control`、`skein-watchdog` 是 systemd 服务；小秋 chat 是 host network Docker 容器。
+- ops 面、`xiaoqiu-ops` 容器、旧 `yanzhen` / `yanzhen-node` 已停止/删除；`/root/yanzhen` 代码目录仍保留。
 
-| 项 | 状态 |
+## 4. 核心流程
+
+1. **前厅**：`xiaoqiu/app/frontdesk.py` 每 60 秒轮询论坛；帖子/评论/楼中楼统一走 LLM 判断，
+   所有吐槽都回，bug/request 调控制面 `POST /internal/intake`。
+2. **建单/合并**：同帖已有活跃工单时评论/楼中楼作为 followup 合并，不重复建单。
+3. **派工**：管理员在控制台派单，或 Agent/Console 调 `/internal/tickets/{id}/dispatch`；
+   节点 WebSocket 建 worker，工雁在 worktree 完成并回传结果。
+4. **验收/回写**：管理员 approve → `public_status=fixed` → 控制面调小秋
+   `/internal/skein/notify` → 小秋以机器人账号回原帖；reject 回 `need_info`。
+5. **定时作业**：`/etc/skein/jobs.json` 驱动 tech-digest ingest/daily/star/weekly、
+   post-curator；作业源码镜像 `/srv/skein-jobs/repo-cache/Agent.git`。
+6. **Watchdog**：确定性信号自动建单（派单超时、作业失败、节点离线等），`skein-watchdog` 独立进程。
+
+## 5. 配置与数据
+
+- 控制面：`/etc/skein/env`（600），字段见 `docs/control-plane.md`；不要从仓库读生产密钥。
+- 小秋 chat：环境变量在容器 `docker inspect xiaoqiu-chat`；生产 settings 只读挂载
+  `/etc/skein/xiaoqiu-chat-settings.yaml`。
+- 控制面库：`/srv/skein/skein.db`；每日 03:17 `deploy/scripts/backup-skein.sh` 备份到
+  `/srv/skein/backups/`，保留 7 天。
+- 小秋 PG：DSN 在小秋环境；ops 旧表已归档到
+  `/srv/skein/backups/xiaoqiu-ops-history-20261121.json.gz` 后删除。
+- 论坛：Go 容器 `server` + MySQL `sse_market_db`；内部回帖端点
+  `/internal/xiaoqiu/reply`，RAG hook 已指向 chat 8119。
+
+## 6. 部署/回滚
+
+### Skein
+
+```bash
+cd /root/skein
+git pull --ff-only
+cd services/console && npm run build
+cd /root/skein && systemctl restart skein-control
+curl -s http://172.17.0.1:7800/health/ready
+```
+
+备份恢复：停 `skein-control` → 替换 `/srv/skein/skein.db` → 启动。
+
+### 小秋
+
+```bash
+cd /root/xiaoqiu-build
+git pull --ff-only
+docker build -f docker/Dockerfile.skein-frontdesk -t xiaoqiu:<tag> .
+# 用 docker inspect xiaoqiu-chat 的 Env 重建容器；镜像会先清空基础镜像的 app 再覆盖仓库 app
+```
+
+### Go
+
+源码改完必须 `go build` + 替换容器 `/app/serve` + `docker restart server`；生产二进制是热替换，
+重建镜像前先留 `/root/serve.bak-*`。
+
+## 7. 自检
+
+```bash
+curl -s http://172.17.0.1:7800/health/live
+curl -s http://172.17.0.1:7800/health/ready
+curl -s -H "X-Skein-Token: $SKEIN_TOKEN" http://172.17.0.1:7800/internal/summary
+curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:8119/health/live
+systemctl is-active skein-control skein-watchdog
+docker logs --tail 50 xiaoqiu-chat | grep frontdesk
+```
+
+控制台：**https://skein.ssemarket.cn/console/**。
+
+## 8. 当前边界
+
+- L4 自动合入永不做；验收/合入必须人工。
+- 小秋 ops、秋坞、qdock 沙箱/平台上报、旧 yanzhen 均已下线；相关历史文档只作存档。
+- 已删除：旧 Router/Outbox/订阅、`/internal/trigger`、`/internal/chat`、
+  `/internal/outbox/emit`、`/api/v1/agent/ticket`、`/ops/*` 代理。
+- 旧雁阵代码/数据保留在 `/root/yanzhen`、`/srv/ro/yanzhen`；需要彻底删除时先确认。
+- 当前有一个真实自维护工单由 `tech-digest-ingest` 失败触发，处理状态看控制台「需求」。
+
+## 9. 排障入口
+
+| 现象 | 先看 |
 | --- | --- |
-| 控制面 | 173 后端测试通过，ruff 全绿 |
-| 控制台 | vue-tsc 通过，生产构建通过 |
-| 真实数据 | 9 张工单、14 条派工状态、3 个会话、321 事件已迁入 staging |
-| P0 只读演练 | 服务器 `/root/skein-p0`，端口 7801，systemd `skein-p0` |
-| 旧生产 | `yanzhen.ssemarket.cn` 仍是旧 Node 雁阵，**未切换** |
-| P2 | 常驻 Router、订阅直通、Inline/Spill、取消、Watchdog、多信道入口已实现，默认关闭 |
+| 控制台 401/403 | UniSSO 账号 `internal`/`is_admin`；nginx → 7800；`/api/session` |
+| 前厅不回帖 | `docker logs xiaoqiu-chat` 的 frontdesk；`SKEIN_CONTROL_URL`/`GO_INTERNAL_URL` |
+| 工单不派工 | 控制台节点在线/容量；`skein-control` 日志；`/internal/nodes` |
+| 作业失败 | `/internal/runs`；`/srv/skein-jobs`；Watchdog 自动建单 |
+| 控制面异常 | `journalctl -u skein-control -n 100`；`/srv/skein/backups` |
+| RAG 不更新 | Go `server` 日志 `[raghook]`；chat `/internal/rag/*`；Qdrant |
 
-## 4. 本地运行
+## 10. 下一步
 
-```bash
-# 后端
-cd services/control
-python -m venv .venv
-.venv/Scripts/pip install -e ".[dev]"
-.venv/Scripts/python -m pytest -q
-.venv/Scripts/python -m ruff check src tests
-.venv/Scripts/python -m skein            # 127.0.0.1:7800
-
-# 前端
-cd services/console
-npm install
-npm run dev                              # Vite，代理 /internal 到 7800
-npm run build                            # 输出 dist
-```
-
-控制面令牌用 `SKEIN_TOKEN`；浏览器右上角令牌框写入 `localStorage` 的 `skein.token`。
-
-本地预览库当前是迁移后的真实数据：`services/control/data/preview.db`；演示库备份在 `preview-demo.db`。
-
-## 5. 服务器
-
-SSH：
-
-```bash
-ssh SSE_Market     # root@175.178.90.215
-```
-
-P0 只读演练：
-
-```bash
-systemctl status skein-p0
-curl -s http://127.0.0.1:7801/health/live
-ls -l /srv/skein-p0/skein.db
-cat /etc/skein-p0/env     # SKEIN_FORUM_BASE= 为空，写入口 503
-```
-
-浏览器通过隧道访问：
-
-```bash
-ssh -L 7801:127.0.0.1:7801 root@175.178.90.215
-# 本机打开 http://127.0.0.1:7801/console/
-```
-
-更新 P0 代码：
-
-```bash
-# 本机
-bash deploy/p0/package.sh
-scp dist/skein-p0-*.tar.gz root@175.178.90.215:/root/skein-p0.tar.gz
-# 服务器
-tar xzf /root/skein-p0.tar.gz -C /root/skein-p0
-systemctl restart skein-p0
-```
-
-**P0 边界：不停旧雁阵、不改 node-agent、不打开论坛写入口、不跑 poll。**
-
-旧生产仓库在 `/root/yanzhen`；新 main 代码在 `/root/skein`。下线旧系统前不要删 `/root/yanzhen`。
-
-## 6. 数据迁移
-
-```bash
-python3 deploy/scripts/migrate_yanzhen.py \
-  --old /root/yanzhen/data/yanzhen.db \
-  --new /srv/skein-p0/skein.db
-```
-
-预期：`{"events":321,"tickets":9,"assignments":14,"dispatches":14,"sessions":3,"nodes":1}`。
-
-- 可重复执行：第二次全 0，不覆盖节点在线状态。
-- `dispatches` 是旧 action 日志压缩后的每 `(ticket, worker)` 终态；388 条 progress 历史未迁。
-- 旧 transcript 字节不在 SQLite，Workers 页显示 0 轮是正常。
-- 迁移会改标题编码为 UTF-8；终端乱码只是 Windows 控制台。
-
-## 7. 关键开关
-
-```ini
-SKEIN_TOKEN=...              # 控制面令牌
-SKEIN_PORT=7801              # P0 端口
-SKEIN_FORUM_BASE=            # 为空：论坛写入 503（P0 必须）
-SKEIN_FORUM_TOKEN=
-SKEIN_SHADOW=0
-SKEIN_DISPATCH=0
-SKEIN_DRIVER=0
-
-# P2（默认全关）
-SKEIN_ROUTER_SESSION=0
-SKEIN_ROUTER_BATCH=8
-SKEIN_ROUTER_INTERVAL=0.5
-SKEIN_CONTROL_URL=           # 订阅直通需要；P0 为空
-SKEIN_WATCHDOG=0
-SKEIN_WATCHDOG_AUTO=0
-SKEIN_WATCHDOG_INTERVAL=300
-```
-
-## 8. P2 已实现与边界
-
-见 `docs/p2.md`。摘要：
-
-- 常驻 Router + 批处理：`router/session.py`、`router/runtime.py`、`host.dispatch_batch`。
-- 订阅直通：`POST /internal/events/followup`，采集进程回退 Router。
-- Inline/Spill：`router/context.py`，事件摘要 200 字，正文留库。
-- 取消：`POST /internal/tickets/{id}/cancel`，工单回暂存；cc 进程不杀。
-- Watchdog：`watchdog_agent.py`，默认只观察；`AUTO=1` 只进金丝雀，不自动升格。
-- 多信道入口：`POST /internal/trigger`。
-
-已知边界：
-
-- 订阅直通 nack 会丢事件，没有 ack 重试。
-- 异步 ReAct 的 `start/stop` 工具协议还没做。
-- 链式召回、按信道定制的出站 writer 还没做。
-- Watchdog 没有“目标偏航”模型判断，只处理确定性信号。
-- 常驻 Router 单会话，没有分片/多层过滤。
-
-## 9. 下一步建议
-
-1. **切生产前**：在 P0 端口跑影子模式一周，核对 `shadow_decisions` 与人工判断。
-2. **产品化 2**：统一剩余空态、节点/Worker 深链已做，补 Ticket 列表空态和移动端不追求。
-3. **P2 边界**：先做订阅直通 ack/重试，再做异步 `start/stop`，最后链式召回和信道出站。
-4. **不要**在验证前打开 `SKEIN_DISPATCH=1` 或论坛写入口。
-
-## 10. 最近检查点
-
-本地分支：
-
-```text
-p0-rehearsal   P0 迁移修复 + 只读部署单元
-p2-core        P2 核心
-product-1      产品定位、四工作面、工作台、About、工单深链
-```
-
-这些是本地检查点，最终以 `main` 最新提交为准；远端 `origin/main` 在推送后更新。
-
-## 11. 排障顺序
-
-1. `/health/live` 是否 200。
-2. `/internal/summary` 带令牌是否正常。
-3. `/internal/tickets` 是否 9 条。
-4. 控制台 `/console/` 是否为 Vite 产物（有 `id="app"` 和 `/console/assets/`）；否则是 legacy。
-5. 日志页或 `journalctl -u skein-p0 -n 100`。
-6. 写入口是否 503（P0 应为 503）。
-7. 磁盘水位：根盘长期 94%，数据目录放 `/srv`，不要放根盘。
+1. 给前厅补齐 Thread 订阅/独立 followup 或 outbox 重试（当前同帖合并已做，公开状态只回原 origin）。
+2. 工雁 Claude Code 单次模型调用/transcript 上报（目前只有小秋/Agent/前厅留痕）。
+3. 节点容量从 `n-cloud-skein` 扩展；节点离线/作业失败信号保持人工验收。
+4. 需要彻底清理 `/root/yanzhen` 时再单独确认。

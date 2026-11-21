@@ -1,7 +1,7 @@
 # 部署与切换
 
 > 2026-11-21 · 当前生产：A 控制面 + 集市云 pod 执行节点 + 小秋 chat/ops 容器。秋坞已删除。
-> 旧雁阵 `yanzhen` 不在本文范围；它仍在跑，等确认后单独停。
+> 旧雁阵 `yanzhen` / `yanzhen-node` 已于 2026-11-21 停止并 disable；代码目录保留。
 
 ## 一、安装控制面（A）
 
@@ -157,7 +157,7 @@ XQ_BOT_UID=95317
 - 备份：`/srv/skein/backups/skein-*.db`（7 天）；恢复 = 停 `skein-control`，替换 `skein.db`，启动。
 - 控制面回滚：`systemctl restart skein-control`；代码回滚用 git。
 - 秋坞已删除，无回滚 Secrets；作业镜像和源码在本地/gitee。
-- 旧雁阵 `yanzhen` / `yanzhen-node` 仍 active，停它需要单独确认。
+- 旧雁阵 `yanzhen` / `yanzhen-node` 已停止并 disable；`/root/yanzhen` 代码目录保留。
 
 ## 八、自检
 

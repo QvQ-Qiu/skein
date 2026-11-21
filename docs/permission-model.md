@@ -42,7 +42,7 @@ super_admin true = unisso is_super_admin 或 roles 里有 super_admin
 
 | 入口 | level | 判定 |
 | --- | --- | --- |
-| `/console/*`、`/api/console/*`、`/ops/*`、`/internal/*`（人类） | `admin` | `internal=true` 且 `admin=true` |
+| `/console/*`、`/api/console/*`、`/internal/*`（人类） | `admin` | `internal=true` 且 `admin=true` |
 | chat（`/api/v1/agent/*`、`/task/*`）、`/api/session?surface=market` | `market` | `internal=true` |
 
 - 缓存只缓存“会话对应的主体”，每次请求按入口重新判；先走 market 再走控制台不能绕过。

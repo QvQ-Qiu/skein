@@ -49,14 +49,13 @@
 
 四个工作面（工作台 / 需求 / 运行 / 平台）+ 工作台首屏「阵眼 + 闭环流水线」+ SSE 实时 + UniSSO 登录。
 
-### 1.5 测试与部署状态
+### 1.5 测试与部署状态（2026-11-21）
 
-- 186 个 Python 测试、9 个 Node 测试、ruff 干净、CI 全绿。
-- 服务器 `/root/skein` 已同步；`dist` 已构建。
-- **P0 只读演练** `skein-p0.service` 在 7801 跑着（独立库，321 事件 / 9 工单，不写不派）。
-- **正式服务未安装**（`skein-control` 未启用，`/etc/skein` 未建）。
-- **UniSSO 已注册并验通**：`Skein 控制台`（app_647d8010af88f775），password/verify、session/verify、revoke 全 200。
-- 旧雁阵 `yanzhen` 仍在服务；node-agent 未改指向。
+- 控制面 142 个测试、xiaoqiu 17 个测试通过；console `npm run build` 通过。
+- `/root/skein` 已同步，`skein-control` / `skein-watchdog` 已安装并 active；P0 演练已删除。
+- **UniSSO 已接**：`Skein 控制台`（app_647d8010af88f775），控制台只放 `is_admin=1`。
+- 小秋 chat 镜像 `xiaoqiu:1.0.109-skein-frontdesk`，host network :8119；前厅 monitor 开启。
+- 旧雁阵 `yanzhen` / `yanzhen-node` 已停止并 disable；代码目录保留。
 
 ### 1.6 硬件与运行时事实（2026-11-19 实测）
 
@@ -85,10 +84,9 @@
 | --- | --- | --- |
 | nginx 反向代理 | 容器 `sse_market_server-nginx_proxy-1` | :80 / :443，所有 `*.ssemarket.cn` |
 | 主站后端 / MySQL / Redis | 容器 `server` / `sse_market_db` / redis | 127.0.0.1:8080 / :3506 / 内网 |
-| 秋坞与 ops 面板等 | k3s `qiudock` 命名空间，52 个 pod | 集群内 |
-| **旧雁阵 controller** | systemd `yanzhen.service`（`server/index.js`） | :3030 |
-| **旧雁阵 node-agent** | systemd `yanzhen-node.service`（`worker/node-agent.mjs`） | peer :9101；注册节点 `n-market-host`「集市机沙箱节点」，容量 3 |
-| **新控制面 P0 演练** | systemd `skein-p0.service` | 127.0.0.1:7801（只读，独立库） |
+| **Skein 控制面** | systemd `skein-control.service` | 172.17.0.1:7800 |
+| **Skein Watchdog** | systemd `skein-watchdog.service` | 独立进程 |
+| **小秋 chat + 前厅** | Docker `xiaoqiu-chat`（host network） | 127.0.0.1:8119 |
 | frps | systemd `frps.service` | :7000 控制口、:7501 管理口；把 WZ8:32004 映射为 :13004 |
 
 **WZ8 上**：k3s（:6443）+ 集市云平台管理的几十个 pod；UniSSO `unisso_v2` 监听 127.0.0.1:32004，经 frp 变成 `sso.ssemarket.cn`。
