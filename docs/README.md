@@ -5,9 +5,10 @@
 ## 想快速了解这套系统
 
 1. [product.md](product.md) —— 一句话、核心闭环、四个工作面
-2. [architecture.md](architecture.md) —— 五模块与三份权威，为什么这么分层
-3. [plan.md](plan.md) —— 目标、已完成、剩余工作、验收标准
-4. [control-plane.md](control-plane.md) —— 模块清单、接口、环境变量
+2. [platform-vision.md](platform-vision.md) —— 前厅/后厂：小秋 × 雁阵的闭环愿景与权责
+3. [architecture.md](architecture.md) —— 五模块与三份权威，为什么这么分层
+4. [plan.md](plan.md) —— 目标、已完成、剩余工作、验收标准
+5. [control-plane.md](control-plane.md) —— 模块清单、接口、环境变量
 
 ## 要接小秋
 
