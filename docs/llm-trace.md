@@ -63,7 +63,7 @@ SQLite `llm_calls`（schema v8）：
 - 生产 settings 从容器里取出，只替换 `llm` / `ops_llm` 段，存
   `/etc/skein/xiaoqiu-chat-settings.yaml` 与 `/etc/skein/xiaoqiu-ops-settings.yaml`，
   容器以只读挂载覆盖镜像内配置。
-- 镜像：chat `xiaoqiu:1.0.104-skein-frontdesk`（含前厅 monitor），ops `xiaoqiu:1.0.100-skein-trace`。
+- 镜像：chat `xiaoqiu:1.0.106-skein-frontdesk`（chat + 前厅；ops 面已下线）。
 - Langfuse env、回调、ops 的 `langfuse_trace` 工具与 `lftrace` 模块已移除。
 - 烟测：chat 任务 200（qwen 失败后 DeepSeek 接管）；Agent 规划 4 个工具并输出中文结论；
   论坛前厅 `SK-6E4BFA9E` 全链闭环；测试产生的 `llm_calls` 已清理。
