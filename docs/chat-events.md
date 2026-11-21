@@ -32,8 +32,9 @@
 小秋 chat 容器里的 `frontdesk` monitor 每 60 秒轮询论坛最近 10 分钟的帖子和评论：
 
 - 机器人账号（`XQ_BOT_UID=95317`）自己的内容直接跳过；
-- 规则先过滤明显无关内容，再用 DeepSeek 判断 `reply / skip` 和 `bug / request / venting`；
+- 帖子先用规则过滤明显无关内容；**评论一律交给 LLM 判断**，避免“补充/还是不行”这类跟进被关键词漏掉；
 - **所有吐槽/反馈都回**；只有 `bug` / `request` 调 Skein `intake` 建单；
+- 同一帖子已有活跃工单时，新评论作为 followup 合并到该工单，不重复建单；
 - 回执由小秋以机器人账号发到原帖/原评论，带工单号 `SK-...`；
 - 建单失败仍然回执，只是没有工单号；
 - 每条前厅判断都写入 Skein `llm_calls`，`source=frontdesk`，会话 `forum:post:<id>` / `forum:comment:<id>`。
@@ -81,11 +82,14 @@ monitor 配置（chat 容器环境变量）：
   "code": "SK-...",
   "status": "staged",
   "public_status": "received",
-  "created": true
+  "created": true,
+  "followup": false
 }
 ```
 
 - `source=forum_post|forum_comment|chat` 决定 Thread 的 `origin`；`origin_id` 对帖子是帖子 ID，对评论是 `帖子ID:评论ID`。
+- `forum_comment` 且同帖已有非终态工单时，不新建单：摘要追加 `[followup ...]`，返回同一张单，`created=false, followup=true`。
+- 工单已完成/驳回后，同一帖的新评论会重新建单（回归/重开）。
 - `dedup_key` 为空时用 `source|thread|message|requester|title|summary` 的 sha256 前 32 位；重复调用返回同一张单，`created=false`。
 - `origin`、`origin_id`、`requester`、`public_status` 落在 tickets 表，管理员在工单列表能直接看到来源和报障人。
 - 建单只是 `staged`，不自动派工；管理员在控制台派工/验收。
@@ -126,8 +130,8 @@ Content-Type: application/json
 
 ## 4. 还没做
 
-- Thread 订阅直通：后续评论仍按新条目过 monitor，没有直接追加到已有工单；
-- `POST /internal/tickets/{id}/followup` 尚未实现；
+- Thread 订阅只覆盖帖子的一级评论：同帖有活跃工单时评论合并为 followup；`ccomments`（评论的回复）尚未监测；
+- 独立的 `POST /internal/tickets/{id}/followup` 接口未实现，当前由 `intake` 自动合并；
 - 公开状态回写没有 outbox 重试，Skein 发失败只记日志；
 - 用户没有「我的反馈」状态页，进度只在原帖回复里；
 - chat 任务不自动建单，只有显式按钮或论坛 monitor 建单；
@@ -137,8 +141,11 @@ Content-Type: application/json
 
 2026-11-21 论坛实测（测试帖与评论已清理）：
 
-1. 用户发帖 → monitor 分类为 bug → 自动建单 `SK-6E4BFA9E` → 原帖回执带工单号；
-2. 管理员验收通过 → `public_status=fixed` → 原帖收到「已修复，维护者已验收」。
+1. bug 帖 → monitor 自动建单 `SK-CB70A329` → 原帖回执带工单号；
+2. 同帖「补充：控制台还报 500」→ 不再新建单，合并进 `SK-CB70A329`，并在评论下回执；
+3. bug 评论（无活跃工单）→ 新建 `SK-CD5A615A`，`origin=forum_comment`、`origin_id=7909:23163`；
+4. 两张单验收通过 → 原帖收到「已修复」，评论下也收到「已修复」；
+5. 纯吐槽 → 只回执、不建单；机器人自己的评论 → 跳过。
 
 ## 6. 一句话
 
