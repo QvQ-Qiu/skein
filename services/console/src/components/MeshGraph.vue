@@ -14,7 +14,6 @@ import EmptyState from "./EmptyState.vue";
 const TICKET_CAP = 20;
 const MESH_H = 460;
 const DISPATCH_REST = 140;
-const SUB_REST = 110;
 const SESSION_REST = 40;
 const MESH_CUTOFF = 260;
 const MESH_REPULSE = 1500;
@@ -478,7 +477,7 @@ function applyForces(built: Built, width: number, pad: Pad): number {
     const a = pos.get(link.a);
     const b = pos.get(link.b);
     if (!a || !b) continue;
-    spring(a, b, link.kind === "dispatch" ? DISPATCH_REST : SUB_REST, SPRING_K);
+    spring(a, b, DISPATCH_REST, SPRING_K);
   }
 
   let energy = 0;
