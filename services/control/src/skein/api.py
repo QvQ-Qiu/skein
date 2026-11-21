@@ -186,7 +186,7 @@ def create_app(
     qa_user_secret: str = "",
     llm_base: str = "",
     llm_key: str = "",
-    agent_model: str = "qwen-3.8-flash",
+    agent_model: str = "deepseek-v4-flash-vision-exp",
 ) -> FastAPI:
     app = FastAPI(title="skein-control", version="0.1.0")
     sessions = SessionStore(conn, blob_root)

@@ -7,15 +7,16 @@
 **小秋负责“听见、回话、报进度”；Skein 负责“建单、派工、验收、自愈”。**
 小秋不是第二个大脑，是雁阵伸进主站的手和嘴。
 
-## 1. 现在的问题
+## 1. 现在走到哪
 
-小秋已经能聊、能 @ 回复、有自己账号；Skein 已经能建单、派工、验收、Watchdog。
-但两边现在主要是 HTTP 代理：
+截至 2026-11-21，论坛前厅闭环已经跑通：
 
-- 聊天不自动变成工单，工单状态也不自动回到帖子；
-- 用户在帖子里说“坏了”，工雁在 pod 里修，两边不知道对方存在；
-- 管理员在控制台点，用户在主站聊，中间没有一条共享的“事”；
-- 我们刚接了 chat 事件和显式转工单，但还缺自动识别、公开回执、状态回写、线程订阅。
+- 小秋 chat 里的 monitor 轮询帖子/评论，**所有吐槽都回**，bug/需求自动 intake 建单；
+- Skein 派工/验收后按公开状态回写原帖，失败只记日志；
+- chat 任务仍只记事件，不自动建单；显式转工单按钮的后端已就绪。
+
+还缺的是“一条 thread 持续跟着一张单”：后续评论目前仍按新条目处理，没有订阅直通；用户也没有独立的进度页。
+接口细节与已验证记录见 [`chat-events.md`](chat-events.md)。
 
 ## 2. 愿景：一个闭环，两个工作面
 
@@ -63,7 +64,8 @@ Skein（后厂）── 工单、Router、工雁、验收、Watchdog
 6. **执行**：工雁在 worktree 里修，产出分支/提交/diffstat/自测总结；不推送主分支。
 7. **人审**：管理员在控制台验收；通过才合入/部署；驳回则回到工单。
 8. **公开回写**：Skein 状态变化触发 outbound；小秋在原帖回“已定位/修复中/已修复”，只写公开摘要，不写内部细节。
-9. **跟进**：用户在同一 thread 继续回复；Thread 已订阅，后续消息直通工单，不再走通用聊天 Router。
+9. **跟进（直通未做）**：用户在同一 thread 继续回复；现在按新评论再过一遍 monitor，
+   后续改成 Thread 订阅直通，追加到原工单而不是重复建单。
 10. **关闭/重开**：修复上线后小秋请用户确认；用户说没修好就重开；工单闭环。
 
 ## 5. 公开状态 vs 内部状态
@@ -96,36 +98,42 @@ staged → assigned → running → review → done / rejected
 
 ## 6. 接口契约（第一版）
 
-### 6.1 小秋 → Skein：建单
+### 6.1 小秋 → Skein：建单（已上线）
 
-`POST /internal/intake`（小秋服务令牌 + 用户 sub）：
+`POST /internal/intake`（`X-Skein-Token`）：
 
 ```json
 {
-  "source": "forum|chat",
-  "thread_id": "帖子/会话 ID",
-  "message_id": "原消息 ID",
-  "requester_sub": "unisso sub",
+  "source": "forum_post | forum_comment | chat",
+  "thread_id": "帖子 ID（评论也填所属帖子 ID）",
+  "message_id": "帖子或评论 ID",
+  "requester": "forum:<userID>",
   "title": "登录坏了",
   "summary": "点登录按钮没反应，控制台 500",
-  "category": "bug|request|question|ops",
-  "severity": "low|normal|high",
-  "visibility": "market|internal",
-  "dedup_key": "sha256(source|thread|user|text)[:32]"
+  "category": "bug | request | venting",
+  "severity": "low | normal | high",
+  "visibility": "market",
+  "dedup_key": ""
 }
 ```
 
-返回：`{ticket_id, code, public_status}`。Skein 负责去重、建 thread、写审计。
+返回：`{ticket_id, code, status, public_status, created}`。Skein 负责去重、建 thread、
+写 `origin/origin_id/requester/public_status` 与审计。
 
-### 6.2 用户跟进：小秋 → Skein
+### 6.2 用户跟进：小秋 → Skein（未实现）
 
 `POST /internal/tickets/{id}/followup`：带新消息文本、message_id、用户 sub。
-Thread 已订阅时直通工单，不再走通用 Router。
+Thread 已订阅时直通工单，不再走通用 Router。当前评论仍按新条目过 monitor。
 
-### 6.3 Skein → 小秋：公开回写
+### 6.3 Skein → 小秋：公开回写（已上线）
 
-Skein 状态变化写 `outbound_messages`（幂等键 `ticket:<id>:<public_status>`），
-由小秋或一个 channel worker 发到原 thread；失败重试；同一状态不重复发。
+Skein 在派工/验收时直接调小秋
+`POST {SKEIN_QA_CHAT_UPSTREAM}/internal/skein/notify`（`X-Skein-Token`），
+带 `ticket_id/code/public_status/origin/origin_id`；小秋再调 Go 主站
+`/internal/xiaoqiu/reply` 以机器人账号发到原帖。
+
+- 同一张单、同一公开状态只发一次（按 `tickets.public_status` 去重）。
+- 发送失败只记日志；尚未接入 outbox 重试。
 
 ### 6.4 管理员 ops 对话
 
@@ -170,8 +178,8 @@ Skein 状态变化写 `outbound_messages`（幂等键 `ticket:<id>:<public_statu
 
 1. **小秋不是 Router，是 channel worker。** 它只有两个对外动作：`intake` 和
    `notify`；任务怎么拆、派给谁、什么时候停，全部由 Skein 决定。
-2. **Thread 订阅直通。** 工单一开，原帖/原会话就是这条 Thread；后续评论直通工单，
-   不再回到通用聊天，避免上下文丢失和重复建单。
+2. **Thread 订阅直通（待做）。** 工单一开，原帖/原会话就是这条 Thread；后续评论直通工单，
+   不再回到通用聊天，避免上下文丢失和重复建单。当前先按新条目再过 monitor。
 3. **工单是唯一真相。** 小秋不维护“处理到哪了”的状态；状态只从 Skein 读，
    公开话术由模板生成。
 4. **公开/内部两套状态机。** 公开只到“已收到/处理中/已修复/需补充”，
@@ -185,12 +193,14 @@ Skein 状态变化写 `outbound_messages`（幂等键 `ticket:<id>:<public_statu
 
 ## 10. 分期
 
-### Phase A（先把闭环跑通）
+### Phase A（先把闭环跑通）—— 已完成 2026-11-21
 
-- 小秋规则快筛 + 所有吐槽都回 + `intake` 建单（只建可执行项）；
-- 公开状态回写（已收到/处理中/已修复）；
-- 控制台工单显示来源 thread/message；用户在原帖追问能回到工单；
-- 只在论坛评论 + chat 两个入口；情绪吐槽只回执/记录，不建单。
+- [x] 小秋规则快筛 + 所有吐槽都回 + `intake` 建单（只建可执行项）；
+- [x] 公开状态回写（处理中/已修复/需补充）；
+- [x] 控制台工单显示来源 thread/message（`origin`/`origin_id`/`requester`）；
+- [x] 论坛帖子 + 评论两个入口；情绪吐槽只回执/记录，不建单；
+- [ ] 用户在原帖追问直通工单（Thread 订阅）；
+- [ ] 公开回写失败重试（outbox）。
 
 ### Phase B（分诊与体验）
 
@@ -232,15 +242,24 @@ Skein 状态变化写 `outbound_messages`（幂等键 `ticket:<id>:<public_statu
 - 每天需要人工介入的次数；
 - 误建单率（管理员驳回/关闭的比例）。
 
-## 13. 待你拍板
+## 13. 已定与未定
 
-1. 哪些类别自动建单：只 bug/需求，还是吐槽也建？
-2. 小秋是否在未被 @ 时主动回？先只在 @/明确报障时回？
-3. 公开状态是否承诺时间（“今天内”）？建议不承诺。
-4. 管理员 ops 对话先只读，还是直接给派工/取消？
-5. 用户在哪里看进度：原帖回复就够，还是再加“我的反馈”页？
-6. 小秋账号是否加“AI 助手”标识？
-7. 旧雁阵 `yanzhen` 是否也停掉？
+已定：
+
+1. 只对 bug/需求自动建单；纯吐槽只回执、记录。
+2. 未被 @ 也回：前厅 monitor 轮询全部新帖/评论，规则 + LLM 快筛。
+3. 不承诺时间；公开话术只写状态。
+4. 管理员写操作仍走控制台；ops 对话先只读。
+5. 用户进度先只在原帖回复里，不做独立页面。
+6. 小秋使用论坛机器人账号 `XQ_BOT_UID=95317`。
+7. 公开面先 L1，内部可 L2，L3 可开关，L4 永不。
+
+未定：
+
+1. 旧雁阵 `yanzhen` 何时停；
+2. Thread 订阅直通与 followup 的优先级；
+3. 公开回写是否改走 outbox 重试；
+4. 用户「我的反馈」页要不要做。
 
 ## 14. 一句话
 

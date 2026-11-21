@@ -11,7 +11,7 @@
 
 ## 要接小秋
 
-- [chat-events.md](chat-events.md) —— 聊天事件 → Skein 事件/工单的首版契约
+- [chat-events.md](chat-events.md) —— 论坛前厅/聊天事件 → Skein 工单与公开状态回写
 - [llm-trace.md](llm-trace.md) —— 会话与模型调用留痕（Skein 内，不接 Langfuse）
 
 ## 要部署

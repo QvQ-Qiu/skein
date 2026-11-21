@@ -77,6 +77,41 @@ SKEIN_TICKET_DAILY_CAP=5
 - 管理员：控制台、ops、Agent 可进。
 - 验收账号：`music-e2e-test@ssemarket.cn`（集市用户，非管理员）。
 
+## 三·五、小秋前厅（论坛闭环）
+
+chat 容器镜像 `xiaoqiu:1.0.101-skein-frontdesk`，host network，监听 `8119`；
+`SKEIN_QA_CHAT_UPSTREAM` 指向 `http://127.0.0.1:8119`。
+
+构建：
+
+```bash
+cd /root/xiaoqiu-build
+docker build -f docker/Dockerfile.skein-frontdesk -t xiaoqiu:1.0.101-skein-frontdesk .
+```
+
+容器关键环境（完整 env 以 `docker inspect xiaoqiu-chat` 为准）：
+
+```ini
+FRONTDESK_ENABLED=1
+FRONTDESK_INTERVAL=60
+FRONTDESK_LOOKBACK=600
+FRONTDESK_MAX_PER_HOUR=12
+FRONTDESK_MODEL=deepseek-v4-flash-vision-exp
+FRONTDESK_LLM_BASE=https://api.deepseek.com/v1
+SKEIN_CONTROL_URL=http://172.17.0.1:7800
+SKEIN_TOKEN=<控制面服务令牌>
+GO_INTERNAL_URL=http://127.0.0.1:8080
+INTERNAL_TOKEN=<主站 INTERNAL_TOKEN>
+XQ_BOT_UID=95317
+```
+
+主站 Go 前置：`/internal/xiaoqiu/reply` 已上线，用 `X-Internal-Token` 鉴权，
+以 `XQ_BOT_UID` 身份写 `pcomments`/`ccomments`。契约见
+[`chat-events.md`](chat-events.md)。
+
+已知缺口：主站 `XQ_AT_URL` 仍指向旧 chat pod 的 `8110`，@ 小秋触发的旧链路不可用；
+前厅 monitor 不依赖它，直接轮询论坛。
+
 ## 四、执行节点（集市云 pod）
 
 见 [`deploy/pod/README.md`](../deploy/pod/README.md)：
@@ -133,4 +168,5 @@ curl -s http://172.17.0.1:7800/health/live
 curl -s http://172.17.0.1:7800/health/ready
 . /etc/skein/env
 curl -s -H "X-Skein-Token: $SKEIN_TOKEN" http://172.17.0.1:7800/internal/summary | head -c 400
+docker logs --tail 30 xiaoqiu-chat 2>&1 | grep -i frontdesk
 ```

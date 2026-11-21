@@ -6,7 +6,7 @@
 
 | 模块 | 文件 | 说明 |
 | --- | --- | --- |
-| 领域库 | `skein/db.py` | SQLite WAL，schema v9；工单/线程/事件/运行/调用/Agent 消息 |
+| 领域库 | `skein/db.py` | SQLite WAL，schema v10；工单/线程/事件/运行/调用/Agent 消息 |
 | 准入 | `skein/admission.py` | 确定性 ignore/record/process；不调模型 |
 | Router | `skein/host.py`、`skein/router/direct.py`、`dispatch.py` | 直答 + 事件分派；工具集 route/attach/ignore/stop/note |
 | 控制台 Agent | `skein/agent.py` | 管理员用自然语言查/操作雁阵；工具调用 + 审计 + 调用留痕 |
@@ -44,7 +44,7 @@ make run-control # 控制面（HTTP）
 | `SKEIN_TOKEN` | 空 | 内部/节点令牌；为空则机器接口 401 |
 | `SKEIN_HOST` / `SKEIN_PORT` | `127.0.0.1` / `7800` | 监听地址 |
 | `SKEIN_LLM_BASE` / `SKEIN_LLM_KEY` | 空 | OpenAI 兼容网关；Router 与 Agent 共用 |
-| `SKEIN_AGENT_MODEL` | `qwen-3.8-flash` | 控制台 Agent 模型 |
+| `SKEIN_AGENT_MODEL` | `deepseek-v4-flash-vision-exp` | 控制台 Agent 模型 |
 | `SKEIN_FORUM_BASE` / `SKEIN_FORUM_TOKEN` | `http://127.0.0.1:8080` / 空 | 出站写回 |
 | `SKEIN_DISPATCH` | `0` | 事件是否自动建单（当前人工/Agent 建单） |
 | `SKEIN_DRIVER` / `SKEIN_JOBS_FILE` | `0` / 空 | 定时作业驱动 |
@@ -70,6 +70,7 @@ make run-control # 控制面（HTTP）
 | GET | `/internal/summary` | 令牌/管理员 | 计数概览 |
 | GET | `/internal/stream` | 令牌/管理员 | SSE 快照 |
 | POST | `/internal/tickets` | 令牌 | 外部建单（Watchdog/脚本） |
+| POST | `/internal/intake` | 令牌 | 前厅（小秋）建单：来源/thread/requester/摘要；dedup 幂等 |
 | POST | `/internal/tickets/{id}/dispatch` | 令牌/管理员 | 派给节点 |
 | POST | `/internal/tickets/{id}/cancel` | 令牌/管理员 | 取消在途派工 |
 | POST | `/internal/tickets/{id}/review` | 管理员 | approve / reject |

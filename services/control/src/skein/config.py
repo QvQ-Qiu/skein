@@ -16,7 +16,7 @@ class Config:
     port: int = 7800
     direct_model: str = "direct"
     route_model: str = "route"
-    agent_model: str = "qwen-3.8-flash"
+    agent_model: str = "deepseek-v4-flash-vision-exp"
     forum_base: str = "http://127.0.0.1:8080"
     forum_token: str = ""
     llm_base: str = ""
