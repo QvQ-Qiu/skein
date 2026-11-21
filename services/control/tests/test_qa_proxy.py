@@ -46,8 +46,9 @@ class FakeClient:
 
 
 class FakeSso:
-    def __init__(self, internal=True):
+    def __init__(self, internal=True, admin=True):
         self.internal = internal
+        self.admin = admin
 
     def password_verify(self, email, password):  # pragma: no cover - 未用
         raise SsoRejected("invalid_credentials", 401)
@@ -55,20 +56,22 @@ class FakeSso:
     def session_verify(self, session):
         if session != "sess-ok":
             raise SsoRejected("invalid_sso", 401)
-        return Principal(sub="u1", name="张三", internal=self.internal)
+        return Principal(
+            sub="u1", name="张三", internal=self.internal, admin=self.admin
+        )
 
     def session_revoke(self, session):  # pragma: no cover
         return None
 
 
-def make_app(tmp_path, sso=False, internal=True, user_secret=""):
+def make_app(tmp_path, sso=False, internal=True, admin=True, user_secret=""):
     conn = db.connect(tmp_path / "qa.db")
     db.migrate(conn)
     client = FakeClient()
     kwargs = {}
     if sso:
         kwargs["sso_config"] = SsoConfig(client_id="c", client_secret="s")
-        kwargs["sso_client"] = FakeSso(internal=internal)
+        kwargs["sso_client"] = FakeSso(internal=internal, admin=admin)
     app = create_app(
         conn,
         str(tmp_path / "blobs"),
@@ -104,7 +107,7 @@ def test_chat_proxies_jwt_and_strips_cookie(tmp_path):
 
 def test_chat_attaches_sso_identity_header(tmp_path):
     app, conn, upstream = make_app(
-        tmp_path, sso=True, internal=False, user_secret="user-secret-123456"
+        tmp_path, sso=True, internal=True, admin=False, user_secret="user-secret-123456"
     )
     with TestClient(app) as client:
         response = client.get(
@@ -118,7 +121,8 @@ def test_chat_attaches_sso_identity_header(tmp_path):
     data = verify_user_header(raw, "user-secret-123456")
     assert data is not None
     assert data["sub"] == "u1"
-    assert data["internal"] is False
+    assert data["internal"] is True
+    assert data["admin"] is False
     conn.close()
 
 
@@ -161,11 +165,20 @@ def test_ops_requires_token_or_internal(tmp_path):
 
 
 def test_ops_rejects_public_sso_user(tmp_path):
-    app, conn, _ = make_app(tmp_path, sso=True, internal=False)
+    app, conn, _ = make_app(tmp_path, sso=True, internal=False, admin=False)
     with TestClient(app) as client:
         response = client.get("/ops/metrics", headers={"Cookie": "unisso_sid=sess-ok"})
     assert response.status_code == 403
     assert response.json()["detail"] == "not_internal"
+    conn.close()
+
+
+def test_ops_rejects_market_user(tmp_path):
+    app, conn, _ = make_app(tmp_path, sso=True, internal=True, admin=False)
+    with TestClient(app) as client:
+        response = client.get("/ops/metrics", headers={"Cookie": "unisso_sid=sess-ok"})
+    assert response.status_code == 403
+    assert response.json()["detail"] == "not_admin"
     conn.close()
 
 

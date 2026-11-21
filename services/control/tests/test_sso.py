@@ -11,26 +11,38 @@ TOKEN = "dev-token"
 
 
 class FakeSsoClient:
-    """unisso 的替身：同样的成功/拒绝/不可用三态。"""
+    """unisso 的替身：internal=集市用户，is_admin=管理员。"""
 
     def __init__(self) -> None:
         self.down = False
         self.revoked: list[str] = []
-        self.users = {"a@ssemarket.cn": ("sess-a", True)}
+        self.users = {"a@ssemarket.cn": "sess-a"}
         self.sessions = {
             "sess-a": Principal(
-                sub="u1", name="张三", email="a@ssemarket.cn", internal=True
+                sub="u1",
+                name="张三",
+                email="a@ssemarket.cn",
+                internal=True,
+                admin=True,
             )
         }
 
     def password_verify(self, email: str, password: str) -> dict:
         if self.down:
             raise SsoUnavailable("down")
-        if email not in self.users or password != "right":
+        session = self.users.get(email)
+        principal = self.sessions.get(session or "")
+        if principal is None or password != "right":
             raise SsoRejected("invalid_credentials", 401)
-        session, internal = self.users[email]
         return {
-            "user": {"sub": "u1", "name": "张三", "email": email, "internal": internal},
+            "user": {
+                "sub": principal.sub,
+                "name": principal.name,
+                "email": email,
+                "internal": principal.internal,
+                "is_admin": principal.admin,
+                "is_super_admin": principal.super_admin,
+            },
             "sso_session": session,
             "sso_cookie_name": "unisso_sid",
             "sso_cookie_domain": ".ssemarket.cn",
@@ -73,6 +85,20 @@ def auth() -> dict[str, str]:
     return {"X-Skein-Token": TOKEN}
 
 
+def add_market_user(env) -> None:
+    env.sso.users["b@ssemarket.cn"] = "sess-b"
+    env.sso.sessions["sess-b"] = Principal(
+        sub="u2", email="b@ssemarket.cn", internal=True, admin=False
+    )
+
+
+def add_external_user(env) -> None:
+    env.sso.users["x@ssemarket.cn"] = "sess-x"
+    env.sso.sessions["sess-x"] = Principal(
+        sub="u3", email="x@ssemarket.cn", internal=False, admin=False
+    )
+
+
 def test_token_mode_when_sso_absent(tmp_path):
     conn = db.connect(tmp_path / "none.db")
     db.migrate(conn)
@@ -93,11 +119,12 @@ def sso_cookie() -> dict[str, str]:
     return {"Cookie": "unisso_sid=sess-a"}
 
 
-def test_login_sets_sso_cookie_and_apis_accept_it(sso_env):
+def test_admin_login_sets_sso_cookie_and_apis_accept_it(sso_env):
     response = sso_env.post(
         "/api/session/login", json={"email": "a@ssemarket.cn", "password": "right"}
     )
     assert response.status_code == 200
+    assert response.json()["kind"] == "admin"
     assert response.json()["user"]["name"] == "张三"
     cookie = response.headers["set-cookie"]
     assert "unisso_sid=sess-a" in cookie
@@ -114,47 +141,46 @@ def test_login_wrong_password_maps_401(sso_env):
     assert response.json()["detail"] == "invalid_credentials"
 
 
-def test_login_non_internal_rejected(sso_env):
-    sso_env.sso.users["b@ssemarket.cn"] = ("sess-b", False)
-    sso_env.sso.sessions["sess-b"] = Principal(
-        sub="u2", email="b@ssemarket.cn", internal=False
-    )
+def test_console_login_rejects_external(sso_env):
+    add_external_user(sso_env)
     response = sso_env.post(
-        "/api/session/login", json={"email": "b@ssemarket.cn", "password": "right"}
+        "/api/session/login", json={"email": "x@ssemarket.cn", "password": "right"}
     )
     assert response.status_code == 403
     assert response.json()["detail"] == "not_internal"
 
 
-def test_market_surface_allows_non_internal(sso_env):
-    sso_env.sso.users["b@ssemarket.cn"] = ("sess-b", False)
-    sso_env.sso.sessions["sess-b"] = Principal(
-        sub="u2", email="b@ssemarket.cn", internal=False
-    )
+def test_market_surface_allows_market_user(sso_env):
+    add_market_user(sso_env)
     response = sso_env.get(
         "/api/session?surface=market", headers={"Cookie": "unisso_sid=sess-b"}
     )
     assert response.status_code == 200
     assert response.json()["kind"] == "market"
-    assert response.json()["user"]["internal"] is False
+    assert response.json()["user"]["internal"] is True
+    assert response.json()["user"]["admin"] is False
 
 
-def test_console_still_rejects_non_internal_after_market_probe(sso_env):
-    # 会话缓存的是主体，不是授权结论；先走 market 再走控制台，必须重新判 internal。
-    sso_env.sso.sessions["sess-b"] = Principal(
-        sub="u2", email="b@ssemarket.cn", internal=False
+def test_market_surface_rejects_external(sso_env):
+    add_external_user(sso_env)
+    response = sso_env.get(
+        "/api/session?surface=market", headers={"Cookie": "unisso_sid=sess-x"}
     )
+    assert response.status_code == 403
+    assert response.json()["detail"] == "not_internal"
+
+
+def test_console_rejects_market_user_after_market_probe(sso_env):
+    # 缓存的是主体，不是授权结论；先走 market 再走控制台，必须重新判 is_admin。
+    add_market_user(sso_env)
     cookies = {"Cookie": "unisso_sid=sess-b"}
     assert sso_env.get("/api/session?surface=market", headers=cookies).status_code == 200
     assert sso_env.get("/api/session", headers=cookies).status_code == 403
     assert sso_env.get("/internal/summary", headers=cookies).status_code == 403
 
 
-def test_market_login_allows_non_internal(sso_env):
-    sso_env.sso.users["b@ssemarket.cn"] = ("sess-b", False)
-    sso_env.sso.sessions["sess-b"] = Principal(
-        sub="u2", email="b@ssemarket.cn", internal=False
-    )
+def test_market_login_allows_market_user_but_not_console(sso_env):
+    add_market_user(sso_env)
     ok = sso_env.post(
         "/api/session/login",
         json={
@@ -170,6 +196,7 @@ def test_market_login_allows_non_internal(sso_env):
         json={"email": "b@ssemarket.cn", "password": "right"},
     )
     assert denied.status_code == 403
+    assert denied.json()["detail"] == "not_admin"
 
 
 def test_logout_revokes_and_clears(sso_env):
@@ -199,7 +226,9 @@ def test_review_records_sso_actor(sso_env):
 
 
 def test_unavailable_maps_503(sso_env):
-    sso_env.sso.sessions["sess-x"] = Principal(sub="u3", internal=True)
+    sso_env.sso.sessions["sess-x"] = Principal(
+        sub="u3", internal=True, admin=True
+    )
     sso_env.sso.down = True
     response = sso_env.get(
         "/internal/summary", headers={"Cookie": "unisso_sid=sess-x"}

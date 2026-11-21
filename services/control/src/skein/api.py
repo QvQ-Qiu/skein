@@ -177,7 +177,9 @@ def create_app(
             return None
         if sso_auth is not None:
             try:
-                principal = await asyncio.to_thread(sso_auth.verify, request.cookies)
+                principal = await asyncio.to_thread(
+                    sso_auth.verify, request.cookies, "admin"
+                )
             except SsoRejected as error:
                 raise HTTPException(status_code=error.status, detail=error.code)
             except SsoUnavailable:
@@ -208,9 +210,10 @@ def create_app(
         if sso_auth is None or sso_config is None:
             return {"mode": "token"}
         allow_market = surface == "market"
+        level = "market" if allow_market else "admin"
         try:
             principal = await asyncio.to_thread(
-                sso_auth.verify, request.cookies, allow_market
+                sso_auth.verify, request.cookies, level
             )
         except SsoRejected as error:
             raise HTTPException(status_code=error.status, detail=error.code)
@@ -220,7 +223,7 @@ def create_app(
         return {
             "mode": "sso",
             "user": principal.as_dict(),
-            "kind": "admin" if principal.internal else "market",
+            "kind": "admin" if principal.admin else "market",
         }
 
     @app.post("/api/session/login")
@@ -241,14 +244,17 @@ def create_app(
         principal = principal_from(payload)
         if principal is None:
             raise HTTPException(status_code=502, detail="sso_bad_response")
-        # 控制台只放 internal=true；market 面（聊天）允许集市用户。
-        if not principal.internal and body.surface != "market":
-            raise HTTPException(status_code=403, detail="not_internal")
+        # 控制台只放 unisso is_admin；market 面放集市用户（internal）。
+        level = "market" if body.surface == "market" else "admin"
+        try:
+            sso_auth.check(principal, level)
+        except SsoRejected as error:
+            raise HTTPException(status_code=error.status, detail=error.code)
         response = JSONResponse(
             {
                 "mode": "sso",
                 "user": principal.as_dict(),
-                "kind": "admin" if principal.internal else "market",
+                "kind": "admin" if principal.admin else "market",
             }
         )
         session = str(payload.get("sso_session") or "")
@@ -295,7 +301,9 @@ def create_app(
         if sso_auth is None:
             raise HTTPException(status_code=401, detail="unauthorized")
         try:
-            principal = await asyncio.to_thread(sso_auth.verify, request.cookies)
+            principal = await asyncio.to_thread(
+                sso_auth.verify, request.cookies, "admin"
+            )
         except SsoRejected as error:
             raise HTTPException(status_code=error.status, detail=error.code)
         except SsoUnavailable:
@@ -309,7 +317,7 @@ def create_app(
             return {}
         try:
             principal = await asyncio.to_thread(
-                sso_auth.verify, request.cookies, True
+                sso_auth.verify, request.cookies, "market"
             )
         except (SsoRejected, SsoUnavailable):
             return {}

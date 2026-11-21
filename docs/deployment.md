@@ -143,13 +143,17 @@ SKEIN_COOKIE_DOMAIN=
 
 ### 两级身份（2026-11-21）
 
+- unisso 的 `internal=true` 是**集市用户**（院内身份），`is_admin=true` 才是**管理员**；
+  `is_super_admin` 也算管理员。unisso 的 `password/verify` / `session/verify` 已返回
+  `is_admin` / `is_super_admin`。
 - `GET /api/session?surface=market` 与 `POST /api/session/login {"surface":"market"}`
-  允许 `internal=false`（集市用户）；控制台、`/ops/*`、`/internal/*` 仍要求 `internal=true`。
-- 控制面 → 小秋 chat 带 `X-Skein-User: v1.<base64url>.<hmac>` 短时身份头。
+  只放 `internal=true`（集市用户）；控制台、`/ops/*`、`/internal/*` 要求 `internal=true`
+  且 `is_admin=true`。集市用户撞控制台返回 403 `not_admin`，外部用户返回 `not_internal`。
+- 控制面 → 小秋 chat 带 `X-Skein-User: v1.<base64url>.<hmac>` 短时身份头，
+  载荷含 `internal / admin / super_admin`；小秋按 `admin` 映射 admin/user。
   `/etc/skein/env` 的 `SKEIN_ASSERTION_KEY` 与 `/etc/skein/xiaoqiu-chat.env` 的
   `SKEIN_USER_SECRET` 必须是同一个随机值（600，不进仓库）。
-- 小秋按 `internal` 映射：`true` → admin，`false` → user；未配置 `SKEIN_USER_SECRET`
-  时忽略身份头、回退论坛 JWT（滚动发布安全）。
+- 未配置 `SKEIN_USER_SECRET` 时小秋忽略身份头、回退论坛 JWT（滚动发布安全）。
 - 当前 chat 镜像 `xiaoqiu:1.0.92-skein-user`（从 `1.0.91` 增量替换
   `app/api/deps.py`，构建件 `docker/Dockerfile.skein-user`）。
 

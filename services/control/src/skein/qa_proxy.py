@@ -44,6 +44,8 @@ def sign_user_header(principal: Principal, secret: str, ttl: int = 60) -> str:
     payload = {
         "sub": principal.sub,
         "internal": bool(principal.internal),
+        "admin": bool(principal.admin),
+        "super_admin": bool(principal.super_admin),
         "email": principal.email,
         "name": principal.name,
         "exp": int(time.time()) + max(ttl, 1),

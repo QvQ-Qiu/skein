@@ -51,6 +51,9 @@ class Principal:
     email: str = ""
     internal: bool = False
     picture: str = ""
+    admin: bool = False
+    super_admin: bool = False
+    roles: tuple[str, ...] = ()
 
     @property
     def label(self) -> str:
@@ -63,19 +66,40 @@ class Principal:
             "email": self.email,
             "internal": self.internal,
             "picture": self.picture,
+            "admin": self.admin,
+            "super_admin": self.super_admin,
+            "roles": list(self.roles),
         }
+
+
+def _flag(value: Any) -> bool:
+    if isinstance(value, str):
+        return value.strip().lower() in ("1", "true", "yes")
+    return bool(value)
 
 
 def principal_from(payload: Any) -> Principal | None:
     user = payload.get("user") if isinstance(payload, dict) else None
     if not isinstance(user, dict) or not user.get("sub"):
         return None
+    raw_roles = user.get("roles") or []
+    roles = tuple(str(role) for role in raw_roles) if isinstance(raw_roles, list) else ()
+    super_admin = _flag(user.get("is_super_admin")) or "super_admin" in roles
+    admin = (
+        _flag(user.get("is_admin"))
+        or _flag(user.get("admin"))
+        or "admin" in roles
+        or super_admin
+    )
     return Principal(
         sub=str(user["sub"]),
         name=str(user.get("name") or ""),
         email=str(user.get("email") or ""),
-        internal=bool(user.get("internal")),
+        internal=_flag(user.get("internal")),
         picture=str(user.get("picture") or ""),
+        admin=admin,
+        super_admin=super_admin,
+        roles=roles,
     )
 
 
@@ -221,9 +245,7 @@ class SsoAuth:
                 return value
         return None
 
-    def verify(
-        self, cookies: dict[str, str], allow_non_internal: bool = False
-    ) -> Principal:
+    def verify(self, cookies: dict[str, str], level: str = "admin") -> Principal:
         session = self.cookie_value(cookies)
         if not session:
             raise SsoRejected("no_sso", 401)
@@ -235,8 +257,8 @@ class SsoAuth:
             if isinstance(cached, SsoRejected):
                 raise cached
             if isinstance(cached, Principal):
-                # 缓存的是会话对应的主体，不是授权结论；内部面必须每次重新判。
-                self._check_internal(cached, allow_non_internal)
+                # 缓存的是会话对应的主体，不是授权结论；每次按入口重新判。
+                self._check_policy(cached, level)
                 return cached
         try:
             principal = self._verify(session)
@@ -247,16 +269,24 @@ class SsoAuth:
             error = SsoRejected("invalid_sso", 401)
             self._remember(session, error, now)
             raise error
-        self._check_internal(principal, allow_non_internal)
+        self._check_policy(principal, level)
         self._remember(session, principal, now)
         return principal
 
-    def _check_internal(self, principal: Principal, allow_non_internal: bool) -> None:
-        if (
-            self._config.require_internal
-            and not principal.internal
-            and not allow_non_internal
-        ):
+    def check(self, principal: Principal, level: str = "admin") -> None:
+        """密码登录拿到的 Principal 也要过同一套入口策略。"""
+        self._check_policy(principal, level)
+
+    def _check_policy(self, principal: Principal, level: str) -> None:
+        if level == "admin":
+            # 管理员必须是集市用户，并且 unisso 标了 is_admin。
+            if not principal.internal:
+                raise SsoRejected("not_internal", 403)
+            if not principal.admin:
+                raise SsoRejected("not_admin", 403)
+            return
+        # market：集市用户（unisso internal）可进；external 不进。
+        if self._config.require_internal and not principal.internal:
             raise SsoRejected("not_internal", 403)
 
     def _remember(self, session: str, value: Any, now: float) -> None:
