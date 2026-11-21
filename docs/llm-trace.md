@@ -50,6 +50,17 @@ SQLite `llm_calls`（schema v8）：
   - 删除 `LANGFUSE_*`（不再上报 Langfuse）
 - 留痕失败只写 debug 日志，不影响对话。
 
+### 5.1 模型池（2026-11-21）
+
+- qdockd 关闭后，chat/ops 主模型改直连 `https://api.ssemarket.cn/v1` + `qwen-3.8-flash`
+  （`LLM_API_KEY_1`）；不再走 `10.43.196.33:7700/v1/llm`。
+- 生产 settings 从容器里取出，只替换 `llm` / `ops_llm` 段，存
+  `/etc/skein/xiaoqiu-chat-settings.yaml` 与 `/etc/skein/xiaoqiu-ops-settings.yaml`，
+  容器以只读挂载覆盖镜像内配置。
+- 镜像：chat `xiaoqiu:1.0.95-skein-trace`，ops `xiaoqiu:1.0.100-skein-trace`。
+- Langfuse env、回调、ops 的 `langfuse_trace` 工具与 `lftrace` 模块已移除。
+- 烟测：chat 任务返回 200，留痕显示 `qwen-3.8-flash`、7738/35 tokens、28.4s。
+
 ## 6. 还没做
 
 - 工雁（cc）单次模型调用上报；定时作业模型调用上报。

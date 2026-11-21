@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # tech-digest：从本地镜像仓跑 daily/star/weekly/ingest（原 qiudock Job 的等价物）。
-# 依赖：/root/qiudock/repo-cache/Agent.git（qdock_repo_mirror 保活）、tech-digest/.env。
+# 依赖：/srv/skein-jobs/repo-cache/Agent.git（本地镜像仓）、tech-digest/.env。
 set -euo pipefail
 
 TASK="${1:?usage: run-tech-digest.sh <ingest|daily|star|weekly> [args...]}"
@@ -8,7 +8,7 @@ shift || true
 
 ROOT=${SKEIN_JOB_ROOT:-/srv/skein-jobs}
 SRC="$ROOT/agent"
-MIRROR=${SKEIN_AGENT_MIRROR:-file:///root/qiudock/repo-cache/Agent.git}
+MIRROR=${SKEIN_AGENT_MIRROR:-file:///srv/skein-jobs/repo-cache/Agent.git}
 VENV="$ROOT/venv"
 STATE=${TECH_DIGEST_STATE:-/root/SSE_Market/SSE-Agent/tech-digest/data}
 

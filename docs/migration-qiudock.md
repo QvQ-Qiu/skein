@@ -3,6 +3,19 @@
 > 2026-11-19 · 目标：秋坞的功能全部迁入 Skein，运维面板与秋坞下架
 > 原则：先建新路径并验证，再停旧路径；任何一步都可回滚；不直接删资源，只先 scale 0 / suspend。
 
+## 0. 2026-11-21 收口
+
+- 秋坞 CronJob 全部 `suspend=true`；`qiudock-platform`、`ops-console`、`image-pins`
+  全部 `replicas=0`；`sbx-*` 沙箱 pod 已删除。
+- 小秋 chat/ops 的 `QDOCK_*` env 已移除；`LANGFUSE_*` 已移除，模型池改直连
+  `https://api.ssemarket.cn/v1` + `qwen-3.8-flash`（详见 `docs/llm-trace.md`）。
+- 保留：秋坞 YAML / Secret / PVC / 镜像；备份在 `/root/decommission-20261121/`。
+  回滚 = `scale --replicas=1` + `suspend=false` + 恢复 `QDOCK_*` env。
+- 未完成：qdockd 的 pod 模板里仍有它自己的 env secrets（已 scale 0，不再使用）；
+  旧雁阵 `yanzhen` / `yanzhen-node` systemd 仍 active；Skein 作业缓存仍引用
+  `/root/qiudock/repo-cache/Agent.git`，下一步迁到 `/srv/skein-jobs/repo-cache`。
+
+
 ## 1. 秋坞现在有什么（实测）
 
 **长驻（k3s `qiudock` 命名空间）**

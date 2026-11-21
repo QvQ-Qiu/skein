@@ -5,7 +5,7 @@ set -euo pipefail
 
 ROOT=${SKEIN_JOB_ROOT:-/srv/skein-jobs}
 SRC="$ROOT/agent"
-MIRROR=${SKEIN_AGENT_MIRROR:-file:///root/qiudock/repo-cache/Agent.git}
+MIRROR=${SKEIN_AGENT_MIRROR:-file:///srv/skein-jobs/repo-cache/Agent.git}
 VENV="$ROOT/venv"
 STATE=${POST_CURATOR_STATE:-/root/SSE_Market/SSE-Agent/post-curator/data}
 
