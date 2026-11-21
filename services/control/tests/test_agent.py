@@ -157,13 +157,7 @@ def test_agent_tool_loop_executes_tool(tmp_path):
         if calls["n"] == 1:
             return {
                 "role": "assistant",
-                "content": "",
-                "tool_calls": [
-                    {
-                        "id": "c1",
-                        "function": {"name": "list_tickets", "arguments": "{}"},
-                    }
-                ],
+                "content": '{"action":"tool","tool":"list_tickets","args":{}}',
             }
         return {"role": "assistant", "content": "有一张。"}
 

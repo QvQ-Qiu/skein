@@ -23,109 +23,23 @@ SYSTEM = """你是雁阵（Skein）控制台 Agent，服务对象是维护者/�
 - 查工单/节点/运行/信号/模型调用用工具；不要编造。
 - 只有管理员明确要求时才 dispatch/cancel；不自动合入、不自动验收、不删资源。
 - 工单状态以工具结果为准；不确定就问，不要猜。
-- 涉及代码执行的建议，用「工单/工伴」描述，不假装自己改了代码。"""
+- 涉及代码执行的建议，用「工单/工伴」描述，不假装自己改了代码。
 
-TOOLS = [
-    {
-        "type": "function",
-        "function": {
-            "name": "summary",
-            "description": "雁阵当前概览：事件/工单/运行/节点计数",
-            "parameters": {"type": "object", "properties": {}},
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "list_tickets",
-            "description": "列出工单，可按状态过滤",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "status": {"type": "string", "description": "staged/assigned/running/review/done/rejected"},
-                    "limit": {"type": "integer"},
-                },
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "ticket_detail",
-            "description": "按工单 ID 或 SK-xxxx 查详情（含派工与结果摘要）",
-            "parameters": {
-                "type": "object",
-                "properties": {"ticket_id": {"type": "string"}},
-                "required": ["ticket_id"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "list_nodes",
-            "description": "列出执行节点与在线状态",
-            "parameters": {"type": "object", "properties": {}},
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "list_runs",
-            "description": "最近的定时作业运行",
-            "parameters": {
-                "type": "object",
-                "properties": {"limit": {"type": "integer"}},
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "list_signals",
-            "description": "Watchdog 当前信号（派工超时/节点离线/作业失败等）",
-            "parameters": {"type": "object", "properties": {}},
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "llm_sessions",
-            "description": "最近的会话与模型调用汇总",
-            "parameters": {
-                "type": "object",
-                "properties": {"limit": {"type": "integer"}},
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "dispatch_ticket",
-            "description": "把工单派给在线节点；只有管理员明确要求时调用",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "ticket_id": {"type": "string"},
-                    "platform": {"type": "string"},
-                },
-                "required": ["ticket_id"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "cancel_ticket",
-            "description": "取消工单当前派工；只有管理员明确要求时调用",
-            "parameters": {
-                "type": "object",
-                "properties": {"ticket_id": {"type": "string"}},
-                "required": ["ticket_id"],
-            },
-        },
-    },
-]
+可用工具：
+- summary()：雁阵概览
+- list_tickets(status?, limit?)：工单列表
+- ticket_detail(ticket_id)：工单详情（ID 或 SK-xxxx）
+- list_nodes()：执行节点
+- list_runs(limit?)：定时作业运行
+- list_signals()：Watchdog 信号
+- llm_sessions(limit?)：会话与模型调用汇总
+- dispatch_ticket(ticket_id, platform?)：派工（仅明确要求）
+- cancel_ticket(ticket_id)：取消派工（仅明确要求）
+
+只输出一个 JSON 对象，不要 Markdown、不要解释：
+工具调用：{"action":"tool","tool":"工具名","args":{...}}
+最终回答：{"action":"final","content":"给管理员看的回答"}
+"""
 
 MAX_TOOL_RESULT = 8000
 
@@ -148,6 +62,25 @@ def _tokens(usage: Any, *names: str) -> int:
         if value > 0:
             return value
     return 0
+
+
+def _parse_action(text: str) -> dict | None:
+    raw = text.strip()
+    if raw.startswith("```"):
+        raw = raw.strip("`")
+        if raw.lower().startswith("json"):
+            raw = raw[4:].lstrip()
+    try:
+        data = json.loads(raw)
+    except ValueError:
+        start, end = raw.find("{"), raw.rfind("}")
+        if start < 0 or end <= start:
+            return None
+        try:
+            data = json.loads(raw[start : end + 1])
+        except ValueError:
+            return None
+    return data if isinstance(data, dict) else None
 
 
 class Agent:
@@ -184,31 +117,34 @@ class Agent:
                 content = "模型调用失败，稍后再试。"
                 self._save(thread_id, "assistant", content)
                 return {"reply": content, "tools": tools_used}
-            messages.append(reply)
-            calls = reply.get("tool_calls") or []
-            if not calls:
-                content = str(reply.get("content") or "").strip()
-                if not content:
-                    content = "我查完了，但模型没有给出总结。"
-                self._save(thread_id, "assistant", content)
-                return {"reply": content, "tools": tools_used}
-            for call in calls:
-                function = call.get("function") or {}
-                name = str(function.get("name") or "")
-                raw_args = function.get("arguments") or "{}"
-                try:
-                    args = json.loads(raw_args) if isinstance(raw_args, str) else dict(raw_args)
-                except (ValueError, TypeError):
-                    args = {}
-                result = await self._tool(name, args, principal)
-                tools_used.append(name)
-                messages.append(
-                    {
-                        "role": "tool",
-                        "tool_call_id": call.get("id") or "",
-                        "content": _clip(result),
-                    }
-                )
+            content = str(reply.get("content") or "").strip()
+            messages.append({"role": "assistant", "content": content})
+            action = _parse_action(content)
+            if action is None:
+                final = content or "我查完了，但模型没有给出总结。"
+                self._save(thread_id, "assistant", final)
+                return {"reply": final, "tools": tools_used}
+            kind = str(action.get("action") or "")
+            if not kind:
+                kind = "tool" if action.get("tool") else "final"
+            if kind != "tool":
+                final = str(action.get("content") or content).strip()
+                if not final:
+                    final = "我查完了，但模型没有给出总结。"
+                self._save(thread_id, "assistant", final)
+                return {"reply": final, "tools": tools_used}
+            name = str(action.get("tool") or "")
+            args = action.get("args") or {}
+            if not isinstance(args, dict):
+                args = {}
+            result = await self._tool(name, args, principal)
+            tools_used.append(name)
+            messages.append(
+                {
+                    "role": "user",
+                    "content": f"工具结果（{name}）：{_clip(result)}",
+                }
+            )
         content = "这轮工具调用太长了，请把问题拆小一点再问。"
         self._save(thread_id, "assistant", content)
         return {"reply": content, "tools": tools_used}
@@ -220,8 +156,6 @@ class Agent:
         payload = {
             "model": self._model,
             "messages": messages,
-            "tools": TOOLS,
-            "tool_choice": "auto",
             "temperature": 0.2,
             "max_tokens": 1200,
         }
@@ -235,6 +169,7 @@ class Agent:
             response.raise_for_status()
             data = response.json()
             reply = (data.get("choices") or [{}])[0].get("message") or {}
+            content = str(reply.get("content") or "")
             usage = data.get("usage") or {}
             llm_trace.record(
                 self._conn,
@@ -243,13 +178,13 @@ class Agent:
                 source="skein-agent",
                 model=self._model,
                 prompt=_clip(json.dumps(messages, ensure_ascii=False)),
-                response=_clip(reply.get("content") or reply.get("tool_calls") or ""),
+                response=_clip(content),
                 prompt_tokens=_tokens(usage, "prompt_tokens", "input_tokens"),
                 completion_tokens=_tokens(usage, "completion_tokens", "output_tokens"),
                 latency_ms=int((time.monotonic() - started) * 1000),
                 status="ok",
             )
-            return reply
+            return {"role": "assistant", "content": content}
         except (httpx.HTTPError, ValueError) as exc:
             llm_trace.record(
                 self._conn,
