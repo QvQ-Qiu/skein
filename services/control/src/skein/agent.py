@@ -266,7 +266,7 @@ class Agent:
     def _ticket_detail(self, ticket_id: str) -> dict:
         row = self._conn.execute(
             "SELECT id, code, thread_id, title, summary, status, dedup_key,"
-            " created_at, updated_at FROM tickets"
+            " origin, origin_id, requester, public_status, created_at, updated_at FROM tickets"
             " WHERE id = ? OR code = ? ORDER BY created_at DESC LIMIT 1",
             (ticket_id, ticket_id),
         ).fetchone()

@@ -229,7 +229,17 @@ def _turn_text(root: Path, sha256: str) -> str | None:
     return data.decode("utf-8", errors="replace")
 
 
-_TICKET_LIST_FIELDS = ("id", "code", "title", "status", "thread_id", "updated_at")
+_TICKET_LIST_FIELDS = (
+    "id",
+    "code",
+    "title",
+    "status",
+    "thread_id",
+    "origin",
+    "requester",
+    "public_status",
+    "updated_at",
+)
 
 _STREAM_INTERVAL = 2.0
 _STREAM_PING = 15.0
@@ -240,7 +250,10 @@ _STREAM_EVENTS = 20
 def ticket_rows(
     conn: sqlite3.Connection, *, status: str | None = None, limit: int = 100
 ) -> list[dict]:
-    sql = "SELECT id, code, title, status, thread_id, updated_at FROM tickets"
+    sql = (
+        "SELECT id, code, title, status, thread_id, origin, requester,"
+        " public_status, updated_at FROM tickets"
+    )
     params: list[object] = []
     if status:
         sql += " WHERE status = ?"

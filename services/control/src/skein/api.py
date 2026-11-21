@@ -7,8 +7,12 @@ import base64
 import binascii
 import hashlib
 import json
+import logging
 import sqlite3
+import threading
 import time
+import urllib.error
+import urllib.request
 from collections import defaultdict, deque
 from pathlib import Path
 from typing import Any
@@ -41,6 +45,8 @@ from skein.sso import (
 )
 from skein.summary import summary as build_summary
 from skein.ui_api import create_ui_router, ticket_rows
+
+log = logging.getLogger("skein.api")
 
 
 class ChatIn(BaseModel):
@@ -147,6 +153,19 @@ class AgentChatIn(BaseModel):
     message: str
 
 
+class IntakeIn(BaseModel):
+    source: str
+    thread_id: str
+    message_id: str = ""
+    requester: str = ""
+    title: str
+    summary: str = ""
+    category: str = "bug"
+    severity: str = "normal"
+    visibility: str = "market"
+    dedup_key: str = ""
+
+
 def create_app(
     conn: sqlite3.Connection,
     blob_root: str,
@@ -196,6 +215,50 @@ def create_app(
     user_secret = qa_user_secret
     if llm is not None:
         llm.on_call = lambda call: llm_trace.record(conn, **call)
+
+    def notify_public(ticket_id: str, status: str) -> None:
+        row = conn.execute(
+            "SELECT code, origin, origin_id, title, summary, public_status"
+            " FROM tickets WHERE id = ?",
+            (ticket_id,),
+        ).fetchone()
+        if row is None or not str(row["origin"]).startswith("forum"):
+            return
+        public = {"working": "working", "done": "fixed", "rejected": "need_info"}.get(status)
+        if not public or row["public_status"] == public:
+            return
+        conn.execute(
+            "UPDATE tickets SET public_status = ?, updated_at = ? WHERE id = ?",
+            (public, time.time(), ticket_id),
+        )
+        if not qa.chat_upstream:
+            return
+        payload = {
+            "ticket_id": ticket_id,
+            "code": row["code"],
+            "public_status": public,
+            "origin": row["origin"],
+            "origin_id": row["origin_id"],
+            "title": row["title"],
+            "summary": row["summary"],
+        }
+
+        def _send() -> None:
+            try:
+                request = urllib.request.Request(
+                    qa.chat_upstream.rstrip("/") + "/internal/skein/notify",
+                    data=json.dumps(payload, ensure_ascii=False).encode(),
+                    headers={
+                        "Content-Type": "application/json",
+                        "X-Skein-Token": token,
+                    },
+                    method="POST",
+                )
+                urllib.request.urlopen(request, timeout=3).read()
+            except (urllib.error.URLError, TimeoutError, OSError) as exc:
+                log.warning("public notify %s %s failed: %s", ticket_id, public, exc)
+
+        threading.Thread(target=_send, daemon=True).start()
 
     async def auth(
         request: Request, x_skein_token: str = Header(default="")
@@ -602,6 +665,86 @@ def create_app(
     def list_tickets(status: str | None = None, limit: int = 100) -> dict:
         return {"tickets": ticket_rows(conn, status=status, limit=limit)}
 
+    @app.post("/internal/intake", dependencies=[Depends(auth)])
+    def intake(body: IntakeIn) -> dict:
+        """前厅（小秋）建单：来源/thread/用户/摘要；dedup 幂等。"""
+        title = body.title.strip()[:120]
+        if not title:
+            raise HTTPException(status_code=400, detail="title required")
+        source = body.source.strip() or "forum_post"
+        thread_key = body.thread_id.strip()
+        if not thread_key:
+            raise HTTPException(status_code=400, detail="thread required")
+        material = (
+            f"{source}|{thread_key}|{body.message_id}|{body.requester}"
+            f"|{title}|{body.summary}"
+        )
+        dedup = body.dedup_key.strip() or (
+            "intake:" + hashlib.sha256(material.encode()).hexdigest()[:32]
+        )
+        existing = store.find_ticket_by_dedup(conn, dedup)
+        if existing:
+            row = conn.execute(
+                "SELECT code, status, public_status FROM tickets WHERE id = ?",
+                (existing,),
+            ).fetchone()
+            return {
+                "ticket_id": existing,
+                "code": row["code"] if row else "",
+                "status": row["status"] if row else "",
+                "public_status": row["public_status"] if row else "",
+                "created": False,
+            }
+        thread_origin = "chat" if source == "chat" else "forum"
+        thread_id = store.ensure_thread(conn, thread_origin, thread_key)
+        origin_id = thread_key
+        if source == "forum_comment" and body.message_id:
+            origin_id = f"{thread_key}:{body.message_id}"
+        note = body.summary.strip()
+        note += (
+            f"\n\n[category={body.category} severity={body.severity}"
+            f" visibility={body.visibility} requester={body.requester}]"
+        )
+        ticket_id = store.create_ticket(
+            conn, title, thread_id=thread_id, dedup_key=dedup, summary=note
+        )
+        conn.execute(
+            "UPDATE tickets SET origin = ?, origin_id = ?, requester = ?,"
+            " public_status = 'received', updated_at = ? WHERE id = ?",
+            (
+                source,
+                origin_id,
+                body.requester,
+                time.time(),
+                ticket_id,
+            ),
+        )
+        db.record_audit(
+            conn,
+            "intake",
+            "ticket.intake",
+            {
+                "ticket_id": ticket_id,
+                "source": source,
+                "thread": thread_key,
+                "message": body.message_id,
+                "requester": body.requester,
+                "category": body.category,
+                "severity": body.severity,
+            },
+        )
+        row = conn.execute(
+            "SELECT code, status, public_status FROM tickets WHERE id = ?",
+            (ticket_id,),
+        ).fetchone()
+        return {
+            "ticket_id": ticket_id,
+            "code": row["code"] if row else "",
+            "status": row["status"] if row else "staged",
+            "public_status": row["public_status"] if row else "received",
+            "created": True,
+        }
+
     @app.get("/internal/nodes", dependencies=[Depends(auth)])
     def list_nodes() -> dict:
         rows = conn.execute(
@@ -672,7 +815,10 @@ def create_app(
 
     @app.post("/internal/tickets/{ticket_id}/dispatch", dependencies=[Depends(auth)])
     async def dispatch_ticket(ticket_id: str, platform: str | None = None) -> dict:
-        return await hub.dispatch_ticket(ticket_id, platform)
+        result = await hub.dispatch_ticket(ticket_id, platform)
+        if result.get("ok"):
+            notify_public(ticket_id, "working")
+        return result
 
     @app.post("/internal/tickets", dependencies=[Depends(auth)])
     async def create_ticket(body: TicketIn) -> dict:
@@ -696,6 +842,8 @@ def create_app(
         result = None
         if body.dispatch and body.platform:
             result = await hub.dispatch_ticket(ticket_id, body.platform)
+            if result.get("ok"):
+                notify_public(ticket_id, "working")
         return {"ticket_id": ticket_id, "created": True, "dispatch": result}
 
     @app.post("/internal/tickets/{ticket_id}/review", dependencies=[Depends(auth)])
@@ -714,6 +862,7 @@ def create_app(
             "review",
             {"ticket_id": ticket_id, "decision": body.decision},
         )
+        notify_public(ticket_id, status)
         return {"ticket_id": ticket_id, "status": status}
 
     @app.post("/internal/trigger", dependencies=[Depends(auth)])
