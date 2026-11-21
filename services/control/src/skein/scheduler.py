@@ -121,6 +121,34 @@ def update_dispatch(
     conn.execute(f"UPDATE dispatches SET {', '.join(sets)} WHERE id = ?", tuple(params))
 
 
+def fail_dispatch(
+    conn: sqlite3.Connection,
+    dispatch_id: str,
+    detail: str = "",
+    requeue: bool = True,
+) -> str | None:
+    """把派单收尾为 failed；默认把工单放回 staged，等下一次派单。
+
+    没有这条路径时，worker 侧 nack / 下发失败会让 dispatch 永远停在活动态，
+    既占节点容量，又只能等 Watchdog 报「派单超时」。
+    """
+    row = conn.execute(
+        "SELECT ticket_id FROM dispatches WHERE id = ?", (dispatch_id,)
+    ).fetchone()
+    now = time.time()
+    conn.execute(
+        "UPDATE dispatches SET state = 'failed', detail = ?, updated_at = ? WHERE id = ?",
+        (detail, now, dispatch_id),
+    )
+    if requeue and row is not None:
+        conn.execute(
+            "UPDATE tickets SET status = 'staged', updated_at = ?"
+            " WHERE id = ? AND status IN ('assigned', 'running')",
+            (now, row["ticket_id"]),
+        )
+    return row["ticket_id"] if row is not None else None
+
+
 def dispatch(conn: sqlite3.Connection, ticket_id: str, platform: str | None = None) -> str | None:
     """给工单挑一个节点并开派单；没有可用节点时返回 None，工单保持原状。"""
     node_id = pick_node(conn, platform)

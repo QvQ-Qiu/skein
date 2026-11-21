@@ -103,6 +103,118 @@ def test_dispatch_roundtrip(app_client):
         assert state == "done"
 
 
+def wait_for(check, timeout=2.0):
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        value = check()
+        if value:
+            return value
+        time.sleep(0.02)
+    return check()
+
+
+def dispatch_post(app_client, ticket):
+    return app_client.post(
+        f"/internal/tickets/{ticket}/dispatch?platform=forum",
+        headers={"X-Skein-Token": TOKEN},
+    )
+
+
+def test_dispatch_marks_ticket_assigned_and_rejects_duplicate(app_client):
+    ticket = make_ticket(app_client.conn, code="SK-D1")
+    with app_client.websocket_connect("/api/agent/channel") as ws:
+        register(ws)
+        body = dispatch_post(app_client, ticket).json()
+        assert body["ok"] is True
+        ws.receive_json()  # worker.create
+        status = app_client.conn.execute(
+            "SELECT status FROM tickets WHERE id = ?", (ticket,)
+        ).fetchone()[0]
+        assert status == "assigned"
+        worker_id = app_client.conn.execute(
+            "SELECT worker_id FROM dispatches WHERE id = ?", (body["dispatch_id"],)
+        ).fetchone()[0]
+        assert worker_id == body["worker_id"]
+
+        again = dispatch_post(app_client, ticket).json()
+        assert again["reason"] == "already_active"
+        assert again["dispatch_id"] == body["dispatch_id"]
+
+
+def test_dispatch_unknown_ticket(app_client):
+    response = dispatch_post(app_client, "no-such-ticket")
+    assert response.json() == {"ok": False, "reason": "ticket_not_found"}
+
+
+def test_worker_create_failed_requeues_ticket(app_client):
+    conn = app_client.conn
+    ticket = make_ticket(conn, code="SK-D2")
+    with app_client.websocket_connect("/api/agent/channel") as ws:
+        register(ws)
+        body = dispatch_post(app_client, ticket).json()
+        ws.receive_json()  # worker.create
+        ws.send_json(
+            {"t": "worker.create_failed", "worker_id": body["worker_id"], "reason": "仓库不存在"}
+        )
+        assert wait_for(
+            lambda: conn.execute(
+                "SELECT state FROM dispatches WHERE id = ?", (body["dispatch_id"],)
+            ).fetchone()[0]
+            == "failed"
+        )
+        status = conn.execute("SELECT status FROM tickets WHERE id = ?", (ticket,)).fetchone()[0]
+        assert status == "staged"
+
+
+def test_nack_marks_dispatch_failed_and_requeues(app_client):
+    conn = app_client.conn
+    ticket = make_ticket(conn, code="SK-D3")
+    with app_client.websocket_connect("/api/agent/channel") as ws:
+        register(ws)
+        body = dispatch_post(app_client, ticket).json()
+        ws.receive_json()  # worker.create
+        ws.send_json({"t": "worker.created", "worker_id": body["worker_id"], "session_id": "s"})
+        assert ws.receive_json()["t"] == "dispatch"
+        ws.send_json(
+            {"t": "nack", "ticket_id": ticket, "worker_id": body["worker_id"], "reason": "busy"}
+        )
+        state = wait_for(
+            lambda: conn.execute(
+                "SELECT state FROM dispatches WHERE id = ?", (body["dispatch_id"],)
+            ).fetchone()[0]
+            == "failed"
+        )
+        assert state
+        assert conn.execute(
+            "SELECT status FROM tickets WHERE id = ?", (ticket,)
+        ).fetchone()[0] == "staged"
+
+
+def test_worker_created_recovers_dispatch_after_control_plane_restart(app_client):
+    """_pending 只在内存里；重启后按 worker_id 从库里恢复并补发 dispatch。"""
+    conn = app_client.conn
+    ticket = make_ticket(conn, code="SK-D4")
+    conn.execute("UPDATE tickets SET status = 'assigned' WHERE id = ?", (ticket,))
+    conn.execute(
+        "INSERT INTO dispatches (id, ticket_id, node_id, worker_id, state, updated_at)"
+        " VALUES ('deadbeef00000000000000000000000', ?, 'n1', 'w-deadbeef', 'pending', ?)",
+        (ticket, time.time()),
+    )
+    with app_client.websocket_connect("/api/agent/channel") as ws:
+        register(ws)
+        ws.send_json({"t": "worker.created", "worker_id": "w-deadbeef", "session_id": "s"})
+        message = ws.receive_json()
+        assert message["t"] == "dispatch"
+        assert message["worker_id"] == "w-deadbeef"
+        assert message["ticket"]["code"] == ticket
+        state = wait_for(
+            lambda: conn.execute(
+                "SELECT state FROM dispatches WHERE worker_id = 'w-deadbeef'"
+            ).fetchone()[0]
+        )
+        assert state == "dispatched"
+
+
 def test_dispatch_without_node(app_client):
     ticket = make_ticket(app_client.conn, code="SK-2")
     response = app_client.post(
