@@ -187,7 +187,11 @@ function loginErrorText(err: unknown): string {
     if (err.status === 503) return "单点登录暂时不可用，稍后再试";
     if (err.status === 429) return "尝试次数过多，请 15 分钟后再试";
     if (err.status === 403 && err.message === "not_internal") return "该账号没有院内身份";
-    if (err.status === 403) return "应用未开通密码校验，请联系管理员";
+    if (err.status === 403 && err.message === "not_admin") return "该账号没有管理员权限";
+    if (err.status === 403 && err.message === "password_verify_forbidden") {
+      return "应用未开通密码校验，请联系管理员";
+    }
+    if (err.status === 403) return "没有访问权限";
     if (err.status === 404) return "控制面未配置 UniSSO";
     if (err.status === 401) return "邮箱或密码错误";
     return err.message || "登录失败";
