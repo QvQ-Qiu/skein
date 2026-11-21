@@ -3,6 +3,7 @@ from fastapi.testclient import TestClient
 
 from skein import db
 from skein.api import create_app
+from skein.qa_proxy import verify_user_header
 from skein.sso import Principal, SsoConfig, SsoRejected
 
 TOKEN = "qa-token"
@@ -60,7 +61,7 @@ class FakeSso:
         return None
 
 
-def make_app(tmp_path, sso=False, internal=True):
+def make_app(tmp_path, sso=False, internal=True, user_secret=""):
     conn = db.connect(tmp_path / "qa.db")
     db.migrate(conn)
     client = FakeClient()
@@ -79,6 +80,7 @@ def make_app(tmp_path, sso=False, internal=True):
         qa_panel_secret="panel-secret-123456",
         qa_panel_sub="sub-1",
         qa_panel_email="ops@example.com",
+        qa_user_secret=user_secret,
         **kwargs,
     )
     return app, conn, client
@@ -97,6 +99,40 @@ def test_chat_proxies_jwt_and_strips_cookie(tmp_path):
     assert sent["url"] == "http://chat.test/api/v1/agent/suggestions"
     assert sent["headers"].get("authorization") == "Bearer user-token"
     assert "cookie" not in {k.lower() for k in sent["headers"]}
+    conn.close()
+
+
+def test_chat_attaches_sso_identity_header(tmp_path):
+    app, conn, upstream = make_app(
+        tmp_path, sso=True, internal=False, user_secret="user-secret-123456"
+    )
+    with TestClient(app) as client:
+        response = client.get(
+            "/api/v1/agent/x", headers={"Cookie": "unisso_sid=sess-ok"}
+        )
+    assert response.status_code == 200
+    sent = upstream.requests[-1]["headers"]
+    assert "cookie" not in {k.lower() for k in sent}
+    raw = sent.get("x-skein-user")
+    assert raw
+    data = verify_user_header(raw, "user-secret-123456")
+    assert data is not None
+    assert data["sub"] == "u1"
+    assert data["internal"] is False
+    conn.close()
+
+
+def test_chat_strips_client_supplied_identity_header(tmp_path):
+    app, conn, upstream = make_app(tmp_path)
+    with TestClient(app) as client:
+        response = client.get(
+            "/api/v1/agent/x",
+            headers={"X-Skein-User": "forged", "Authorization": "Bearer user-token"},
+        )
+    assert response.status_code == 200
+    assert "x-skein-user" not in {
+        k.lower() for k in upstream.requests[-1]["headers"]
+    }
     conn.close()
 
 

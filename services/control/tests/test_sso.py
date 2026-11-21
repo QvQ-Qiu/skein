@@ -126,6 +126,52 @@ def test_login_non_internal_rejected(sso_env):
     assert response.json()["detail"] == "not_internal"
 
 
+def test_market_surface_allows_non_internal(sso_env):
+    sso_env.sso.users["b@ssemarket.cn"] = ("sess-b", False)
+    sso_env.sso.sessions["sess-b"] = Principal(
+        sub="u2", email="b@ssemarket.cn", internal=False
+    )
+    response = sso_env.get(
+        "/api/session?surface=market", headers={"Cookie": "unisso_sid=sess-b"}
+    )
+    assert response.status_code == 200
+    assert response.json()["kind"] == "market"
+    assert response.json()["user"]["internal"] is False
+
+
+def test_console_still_rejects_non_internal_after_market_probe(sso_env):
+    # 会话缓存的是主体，不是授权结论；先走 market 再走控制台，必须重新判 internal。
+    sso_env.sso.sessions["sess-b"] = Principal(
+        sub="u2", email="b@ssemarket.cn", internal=False
+    )
+    cookies = {"Cookie": "unisso_sid=sess-b"}
+    assert sso_env.get("/api/session?surface=market", headers=cookies).status_code == 200
+    assert sso_env.get("/api/session", headers=cookies).status_code == 403
+    assert sso_env.get("/internal/summary", headers=cookies).status_code == 403
+
+
+def test_market_login_allows_non_internal(sso_env):
+    sso_env.sso.users["b@ssemarket.cn"] = ("sess-b", False)
+    sso_env.sso.sessions["sess-b"] = Principal(
+        sub="u2", email="b@ssemarket.cn", internal=False
+    )
+    ok = sso_env.post(
+        "/api/session/login",
+        json={
+            "email": "b@ssemarket.cn",
+            "password": "right",
+            "surface": "market",
+        },
+    )
+    assert ok.status_code == 200
+    assert ok.json()["kind"] == "market"
+    denied = sso_env.post(
+        "/api/session/login",
+        json={"email": "b@ssemarket.cn", "password": "right"},
+    )
+    assert denied.status_code == 403
+
+
 def test_logout_revokes_and_clears(sso_env):
     sso_env.post("/api/session/login", json={"email": "a@ssemarket.cn", "password": "right"})
     response = sso_env.post("/api/session/logout", headers=sso_cookie())

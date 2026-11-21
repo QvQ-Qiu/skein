@@ -15,6 +15,10 @@
 5. [migration.md](migration.md) —— 十步迁移路线与服务器工作树布局
 6. [migration-qiudock.md](migration-qiudock.md) —— 秋坞功能迁入 Skein、面板与秋坞下架的阶段与回滚
 
+## 要接身份与权限
+
+6. [permission-model.md](permission-model.md) —— 两级身份（集市用户 / 管理员）、UniSSO 判断与三处改动
+
 ## 要接集市云
 
 6. [market-cloud.md](market-cloud.md) —— 集市云是什么、能用什么、做不到什么

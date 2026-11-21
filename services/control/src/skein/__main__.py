@@ -50,6 +50,7 @@ def build() -> tuple:
         qa_panel_secret=cfg.ops_panel_secret,
         qa_panel_sub=cfg.ops_panel_sub,
         qa_panel_email=cfg.ops_panel_email,
+        qa_user_secret=cfg.assertion_key,
     )
     return app, cfg, conn
 

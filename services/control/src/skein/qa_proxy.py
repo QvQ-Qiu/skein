@@ -10,8 +10,10 @@
 
 from __future__ import annotations
 
+import base64
 import hashlib
 import hmac
+import json
 import time
 from collections.abc import AsyncIterator
 
@@ -19,6 +21,8 @@ import httpx
 from fastapi import HTTPException, Request
 from fastapi.responses import StreamingResponse
 from starlette.background import BackgroundTask
+
+from skein.sso import Principal
 
 HOP_HEADERS = {
     "connection",
@@ -31,6 +35,52 @@ HOP_HEADERS = {
     "upgrade",
     "host",
 }
+# 浏览器不得伪造上游身份头；只允许 Skein 自己签。
+STRIP_HEADERS = HOP_HEADERS | {"x-skein-user"}
+
+
+def sign_user_header(principal: Principal, secret: str, ttl: int = 60) -> str:
+    """给 chat 上游的短时身份头：v1.<base64url(payload)>.<hex hmac>。"""
+    payload = {
+        "sub": principal.sub,
+        "internal": bool(principal.internal),
+        "email": principal.email,
+        "name": principal.name,
+        "exp": int(time.time()) + max(ttl, 1),
+    }
+    raw = json.dumps(
+        payload, ensure_ascii=False, separators=(",", ":"), sort_keys=True
+    ).encode()
+    body = base64.urlsafe_b64encode(raw).decode().rstrip("=")
+    sig = hmac.new(
+        secret.encode(), f"v1.{body}".encode(), hashlib.sha256
+    ).hexdigest()
+    return f"v1.{body}.{sig}"
+
+
+def verify_user_header(value: str, secret: str, now: float | None = None) -> dict | None:
+    """校验身份头；无效/过期/缺字段返回 None。"""
+    try:
+        version, body, sig = value.split(".")
+        if version != "v1":
+            return None
+        expected = hmac.new(
+            secret.encode(), f"v1.{body}".encode(), hashlib.sha256
+        ).hexdigest()
+        if not hmac.compare_digest(sig, expected):
+            return None
+        padding = "=" * (-len(body) % 4)
+        data = json.loads(base64.urlsafe_b64decode(body + padding))
+    except (ValueError, TypeError, json.JSONDecodeError):
+        return None
+    if not isinstance(data, dict) or not data.get("sub"):
+        return None
+    try:
+        if int(data.get("exp", 0)) < int(now if now is not None else time.time()):
+            return None
+    except (TypeError, ValueError):
+        return None
+    return data
 
 
 class QAProxy:
@@ -76,19 +126,27 @@ class QAProxy:
         ).hexdigest()
         return f"ops_session={payload}|{sig}"
 
-    async def forward(self, request: Request, upstream: str, path: str) -> StreamingResponse:
+    async def forward(
+        self,
+        request: Request,
+        upstream: str,
+        path: str,
+        extra_headers: dict[str, str] | None = None,
+    ) -> StreamingResponse:
         url = f"{upstream}/{path.lstrip('/')}"
         if request.url.query:
             url += f"?{request.url.query}"
         headers = {
             key: value
             for key, value in request.headers.items()
-            if key.lower() not in HOP_HEADERS and key.lower() != "cookie"
+            if key.lower() not in STRIP_HEADERS and key.lower() != "cookie"
         }
         if upstream == self.ops_upstream:
             panel = self._panel_cookie()
             if panel:
                 headers["cookie"] = panel
+        if extra_headers:
+            headers.update(extra_headers)
         body = await request.body()
         outgoing = self._client.build_request(
             request.method, url, headers=headers, content=body or None

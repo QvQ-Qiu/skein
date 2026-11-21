@@ -24,7 +24,7 @@ from skein.channel import ChannelHub
 from skein.compat import ForumCompatWriter
 from skein.host import RouterHost
 from skein.outbox import EffectState, EmitResult, Outbox, get
-from skein.qa_proxy import QAProxy
+from skein.qa_proxy import QAProxy, sign_user_header
 from skein.session_store import SessionStore, TurnConflict
 from skein.sso import (
     COOKIE_NAMES,
@@ -102,6 +102,8 @@ class FollowupIn(BaseModel):
 class LoginIn(BaseModel):
     email: str
     password: str
+    # console=只放 internal=true；market=允许集市用户
+    surface: str = "console"
 
 
 QA_METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"]
@@ -143,6 +145,7 @@ def create_app(
     qa_panel_secret: str = "",
     qa_panel_sub: str = "",
     qa_panel_email: str = "skein@ssemarket.cn",
+    qa_user_secret: str = "",
 ) -> FastAPI:
     app = FastAPI(title="skein-control", version="0.1.0")
     sessions = SessionStore(conn, blob_root)
@@ -164,6 +167,7 @@ def create_app(
         panel_email=qa_panel_email,
     )
     login_attempts: dict[str, deque[float]] = defaultdict(deque)
+    user_secret = qa_user_secret
 
     async def auth(
         request: Request, x_skein_token: str = Header(default="")
@@ -199,18 +203,25 @@ def create_app(
         return {"status": "ok"}
 
     @app.get("/api/session")
-    async def session_probe(request: Request) -> dict:
+    async def session_probe(request: Request, surface: str = "console") -> dict:
         # 控制台启动时打这个：决定出登录页还是直接进。sso 没配就声明 token 模式。
         if sso_auth is None or sso_config is None:
             return {"mode": "token"}
+        allow_market = surface == "market"
         try:
-            principal = await asyncio.to_thread(sso_auth.verify, request.cookies)
+            principal = await asyncio.to_thread(
+                sso_auth.verify, request.cookies, allow_market
+            )
         except SsoRejected as error:
             raise HTTPException(status_code=error.status, detail=error.code)
         except SsoUnavailable:
             raise HTTPException(status_code=503, detail="sso_unavailable")
         CURRENT_PRINCIPAL.set(principal)
-        return {"mode": "sso", "user": principal.as_dict()}
+        return {
+            "mode": "sso",
+            "user": principal.as_dict(),
+            "kind": "admin" if principal.internal else "market",
+        }
 
     @app.post("/api/session/login")
     async def session_login(request: Request, body: LoginIn) -> JSONResponse:
@@ -230,9 +241,16 @@ def create_app(
         principal = principal_from(payload)
         if principal is None:
             raise HTTPException(status_code=502, detail="sso_bad_response")
-        if sso_config.require_internal and not principal.internal:
+        # 控制台只放 internal=true；market 面（聊天）允许集市用户。
+        if not principal.internal and body.surface != "market":
             raise HTTPException(status_code=403, detail="not_internal")
-        response = JSONResponse({"mode": "sso", "user": principal.as_dict()})
+        response = JSONResponse(
+            {
+                "mode": "sso",
+                "user": principal.as_dict(),
+                "kind": "admin" if principal.internal else "market",
+            }
+        )
         session = str(payload.get("sso_session") or "")
         if session:
             response.set_cookie(
@@ -285,18 +303,40 @@ def create_app(
         if not principal.internal:
             raise HTTPException(status_code=403, detail="not_internal")
 
+    async def chat_identity_headers(request: Request) -> dict[str, str]:
+        # 集市用户/管理员都能聊天；SSO 有效就带签名身份，失败回退论坛 JWT。
+        if sso_auth is None or not user_secret:
+            return {}
+        try:
+            principal = await asyncio.to_thread(
+                sso_auth.verify, request.cookies, True
+            )
+        except (SsoRejected, SsoUnavailable):
+            return {}
+        return {"x-skein-user": sign_user_header(principal, user_secret)}
+
     @app.api_route("/api/v1/agent/{path:path}", methods=QA_METHODS)
     async def qa_chat_agent(path: str, request: Request) -> StreamingResponse:
-        """小秋 chat 面：用户 JWT 原样透传，用户级鉴权在上游；Cookie 不转发。"""
+        """小秋 chat 面：集市用户/管理员都可；身份头优先，JWT 兜底。"""
         if not qa.enabled_chat:
             raise HTTPException(status_code=503, detail="qa_not_configured")
-        return await qa.forward(request, qa.chat_upstream, f"api/v1/agent/{path}")
+        return await qa.forward(
+            request,
+            qa.chat_upstream,
+            f"api/v1/agent/{path}",
+            await chat_identity_headers(request),
+        )
 
     @app.api_route("/task/{path:path}", methods=QA_METHODS)
     async def qa_chat_task(path: str, request: Request) -> StreamingResponse:
         if not qa.enabled_chat:
             raise HTTPException(status_code=503, detail="qa_not_configured")
-        return await qa.forward(request, qa.chat_upstream, f"task/{path}")
+        return await qa.forward(
+            request,
+            qa.chat_upstream,
+            f"task/{path}",
+            await chat_identity_headers(request),
+        )
 
     @app.api_route("/ops/{path:path}", methods=QA_METHODS)
     async def qa_ops(path: str, request: Request) -> StreamingResponse:

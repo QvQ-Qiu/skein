@@ -221,7 +221,9 @@ class SsoAuth:
                 return value
         return None
 
-    def verify(self, cookies: dict[str, str]) -> Principal:
+    def verify(
+        self, cookies: dict[str, str], allow_non_internal: bool = False
+    ) -> Principal:
         session = self.cookie_value(cookies)
         if not session:
             raise SsoRejected("no_sso", 401)
@@ -233,6 +235,8 @@ class SsoAuth:
             if isinstance(cached, SsoRejected):
                 raise cached
             if isinstance(cached, Principal):
+                # 缓存的是会话对应的主体，不是授权结论；内部面必须每次重新判。
+                self._check_internal(cached, allow_non_internal)
                 return cached
         try:
             principal = self._verify(session)
@@ -243,12 +247,17 @@ class SsoAuth:
             error = SsoRejected("invalid_sso", 401)
             self._remember(session, error, now)
             raise error
-        if self._config.require_internal and not principal.internal:
-            error = SsoRejected("not_internal", 403)
-            self._remember(session, error, now)
-            raise error
+        self._check_internal(principal, allow_non_internal)
         self._remember(session, principal, now)
         return principal
+
+    def _check_internal(self, principal: Principal, allow_non_internal: bool) -> None:
+        if (
+            self._config.require_internal
+            and not principal.internal
+            and not allow_non_internal
+        ):
+            raise SsoRejected("not_internal", 403)
 
     def _remember(self, session: str, value: Any, now: float) -> None:
         with self._lock:
