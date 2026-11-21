@@ -136,7 +136,7 @@ def test_agent_chat_saves_history(tmp_path):
     result = asyncio.run(agent.chat(principal, "th1", "现在有什么要我处理？"))
     assert result["reply"] == "现在有 1 张待验收。"
     rows = conn.execute(
-        "SELECT role, content FROM agent_messages WHERE thread_id='th1' ORDER BY created_at, id"
+        "SELECT role, content FROM agent_messages WHERE thread_id='th1' ORDER BY rowid"
     ).fetchall()
     assert [(row["role"], row["content"]) for row in rows] == [
         ("user", "现在有什么要我处理？"),

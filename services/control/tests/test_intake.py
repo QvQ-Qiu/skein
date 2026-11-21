@@ -48,6 +48,80 @@ def test_intake_creates_and_dedups(tmp_path):
     conn.close()
 
 
+def test_comment_followup_merges_active_ticket(tmp_path):
+    client, conn = make_client(tmp_path)
+    with client:
+        post = client.post(
+            "/internal/intake",
+            json={
+                "source": "forum_post",
+                "thread_id": "42",
+                "message_id": "42",
+                "requester": "forum:278",
+                "title": "图片裂了",
+                "summary": "上传后列表裂图",
+            },
+            headers={"X-Skein-Token": TOKEN},
+        ).json()
+        comment = client.post(
+            "/internal/intake",
+            json={
+                "source": "forum_comment",
+                "thread_id": "42",
+                "message_id": "7",
+                "requester": "forum:278",
+                "title": "补充",
+                "summary": "控制台还报 500",
+            },
+            headers={"X-Skein-Token": TOKEN},
+        ).json()
+    assert comment["ticket_id"] == post["ticket_id"]
+    assert comment["code"] == post["code"]
+    assert comment["created"] is False
+    assert comment["followup"] is True
+    rows = conn.execute("SELECT summary FROM tickets").fetchall()
+    assert len(rows) == 1
+    assert "控制台还报 500" in rows[0]["summary"]
+    conn.close()
+
+
+def test_comment_after_done_creates_new_ticket(tmp_path):
+    client, conn = make_client(tmp_path)
+    with client:
+        post = client.post(
+            "/internal/intake",
+            json={
+                "source": "forum_post",
+                "thread_id": "42",
+                "message_id": "42",
+                "requester": "forum:278",
+                "title": "图片裂了",
+                "summary": "上传后列表裂图",
+            },
+            headers={"X-Skein-Token": TOKEN},
+        ).json()
+        client.post(
+            f"/internal/tickets/{post['ticket_id']}/review",
+            json={"decision": "approve"},
+            headers={"X-Skein-Token": TOKEN},
+        )
+        reopened = client.post(
+            "/internal/intake",
+            json={
+                "source": "forum_comment",
+                "thread_id": "42",
+                "message_id": "8",
+                "requester": "forum:278",
+                "title": "还是坏的",
+                "summary": "修复后仍然裂图",
+            },
+            headers={"X-Skein-Token": TOKEN},
+        ).json()
+    assert reopened["created"] is True
+    assert reopened["ticket_id"] != post["ticket_id"]
+    conn.close()
+
+
 def test_review_moves_public_status(tmp_path):
     client, conn = make_client(tmp_path)
     with client:

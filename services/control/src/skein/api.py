@@ -697,6 +697,42 @@ def create_app(
             }
         thread_origin = "chat" if source == "chat" else "forum"
         thread_id = store.ensure_thread(conn, thread_origin, thread_key)
+        if source == "forum_comment":
+            active = conn.execute(
+                "SELECT id, code, status, public_status FROM tickets"
+                " WHERE thread_id = ? AND status NOT IN ('done','rejected','cancelled')"
+                " ORDER BY created_at DESC LIMIT 1",
+                (thread_id,),
+            ).fetchone()
+            if active is not None:
+                addition = (
+                    f"\n\n[followup message={body.message_id or '-'}"
+                    f" requester={body.requester}] {body.summary.strip() or title}"
+                )
+                conn.execute(
+                    "UPDATE tickets SET summary = substr(summary || ?, -16000),"
+                    " updated_at = ? WHERE id = ?",
+                    (addition, time.time(), active["id"]),
+                )
+                db.record_audit(
+                    conn,
+                    "intake",
+                    "ticket.followup",
+                    {
+                        "ticket_id": active["id"],
+                        "thread": thread_key,
+                        "message": body.message_id,
+                        "requester": body.requester,
+                    },
+                )
+                return {
+                    "ticket_id": active["id"],
+                    "code": active["code"],
+                    "status": active["status"],
+                    "public_status": active["public_status"],
+                    "created": False,
+                    "followup": True,
+                }
         origin_id = thread_key
         if source == "forum_comment" and body.message_id:
             origin_id = f"{thread_key}:{body.message_id}"
