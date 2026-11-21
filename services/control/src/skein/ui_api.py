@@ -72,7 +72,6 @@ _TURN_FIELDS = (
     "created_at",
 )
 _NODE_FIELDS = ("id", "name", "host", "platforms", "status", "max_workers", "last_seen")
-_SUB_FIELDS = ("thread_id", "ticket_id", "state", "created_at")
 _AUDIT_FIELDS = ("id", "actor", "action", "detail", "created_at")
 
 _JSON_PAYLOAD = frozenset({"payload"})
@@ -286,19 +285,11 @@ def _topology_view(conn: sqlite3.Connection) -> dict:
         _DISPATCH_FIELDS,
         _JSON_DETAIL,
     )
-    subscriptions = _rows(
-        conn,
-        "SELECT thread_id, ticket_id, state, created_at FROM subscriptions"
-        " ORDER BY created_at, thread_id, ticket_id",
-        (),
-        _SUB_FIELDS,
-    )
     return {
         "nodes": nodes,
         "tickets": tickets,
         "dispatches": dispatches,
         "sessions": _sessions(conn, limit=_TOPOLOGY_SESSIONS),
-        "subscriptions": subscriptions,
     }
 
 

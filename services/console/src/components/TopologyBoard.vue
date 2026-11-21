@@ -3,7 +3,6 @@ import type {
   Dispatch,
   NodeRecord,
   SessionRecord,
-  SubscriptionRecord,
   Ticket,
 } from "../api";
 import MeshGraph from "./MeshGraph.vue";
@@ -13,7 +12,6 @@ defineProps<{
   tickets: Ticket[];
   dispatches: Dispatch[];
   sessions: SessionRecord[];
-  subscriptions: SubscriptionRecord[];
 }>();
 </script>
 
@@ -23,6 +21,5 @@ defineProps<{
     :tickets="tickets"
     :dispatches="dispatches"
     :sessions="sessions"
-    :subscriptions="subscriptions"
   />
 </template>

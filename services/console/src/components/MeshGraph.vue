@@ -7,7 +7,6 @@ import type {
   Dispatch,
   NodeRecord,
   SessionRecord,
-  SubscriptionRecord,
   Ticket,
 } from "../api";
 import EmptyState from "./EmptyState.vue";
@@ -37,7 +36,6 @@ interface Source {
   tickets: Ticket[];
   sessions: SessionRecord[];
   dispatches: Array<{ nodeId: string; ticketId: string }>;
-  subscriptions: Array<{ a: string; b: string }>;
   hiddenDispatches: number;
   ticketTotal: number;
   empty: boolean;
@@ -59,7 +57,7 @@ interface Body {
 
 interface Link {
   key: string;
-  kind: "dispatch" | "subscription" | "attach";
+  kind: "dispatch" | "attach";
   a: string;
   b: string;
 }
@@ -95,7 +93,7 @@ interface Glyph {
 
 interface Edge {
   key: string;
-  kind: "dispatch" | "subscription";
+  kind: "dispatch";
   d: string;
 }
 
@@ -125,7 +123,6 @@ const props = defineProps<{
   tickets: Ticket[];
   dispatches: Dispatch[];
   sessions: SessionRecord[];
-  subscriptions: SubscriptionRecord[];
 }>();
 
 const router = useRouter();
@@ -151,7 +148,6 @@ const source = computed(() =>
     props.tickets,
     props.dispatches,
     props.sessions,
-    props.subscriptions,
   ),
 );
 const empty = computed(() => source.value.empty);
@@ -385,14 +381,6 @@ function layout(width: number, height: number): Built {
       kind: "dispatch",
       a: `node:${edge.nodeId}`,
       b: `ticket:${edge.ticketId}`,
-    });
-  }
-  for (const edge of data.subscriptions) {
-    links.push({
-      key: `sub:${edge.a}|${edge.b}`,
-      kind: "subscription",
-      a: `ticket:${edge.a}`,
-      b: `ticket:${edge.b}`,
     });
   }
   for (const session of attached) {
@@ -656,7 +644,6 @@ function buildSource(
   ticketsIn: readonly Ticket[] | null | undefined,
   dispatchesIn: readonly Dispatch[] | null | undefined,
   sessionsIn: readonly SessionRecord[] | null | undefined,
-  subscriptionsIn: readonly SubscriptionRecord[] | null | undefined,
 ): Source {
   const nodes = uniqueById(nodesIn);
   const ticketTotal = uniqueById(ticketsIn).length;
@@ -683,47 +670,10 @@ function buildSource(
     tickets,
     sessions,
     dispatches,
-    subscriptions: subscriptionPairs(tickets, subscriptionsIn ?? []),
     hiddenDispatches,
     ticketTotal,
     empty: nodes.length === 0 && tickets.length === 0 && sessions.length === 0,
   };
-}
-
-function subscriptionPairs(
-  tickets: readonly Ticket[],
-  subscriptions: readonly SubscriptionRecord[],
-): Array<{ a: string; b: string }> {
-  const visible = new Set(tickets.map((ticket) => ticket.id));
-  const members = new Map<string, string[]>();
-  const remember = (threadId: string, ticketId: string, lead: boolean) => {
-    if (!threadId || !visible.has(ticketId)) return;
-    const rest = (members.get(threadId) ?? []).filter((id) => id !== ticketId);
-    members.set(threadId, lead ? [ticketId, ...rest] : [...rest, ticketId]);
-  };
-  const threads = new Set<string>();
-  for (const sub of subscriptions) {
-    if (!sub.thread_id || !sub.ticket_id || !visible.has(sub.ticket_id)) continue;
-    threads.add(sub.thread_id);
-    remember(sub.thread_id, sub.ticket_id, false);
-  }
-  for (const ticket of tickets) {
-    if (ticket.thread_id && threads.has(ticket.thread_id)) remember(ticket.thread_id, ticket.id, true);
-  }
-  const pairs: Array<{ a: string; b: string }> = [];
-  const seen = new Set<string>();
-  for (const ids of members.values()) {
-    const anchor = ids[0];
-    if (!anchor || ids.length < 2) continue;
-    for (const id of ids.slice(1)) {
-      if (id === anchor) continue;
-      const key = anchor < id ? `${anchor}|${id}` : `${id}|${anchor}`;
-      if (seen.has(key)) continue;
-      seen.add(key);
-      pairs.push({ a: anchor, b: id });
-    }
-  }
-  return pairs;
 }
 
 function signatureOf(data: Source): string {
@@ -732,7 +682,6 @@ function signatureOf(data: Source): string {
     data.tickets.map((ticket) => ticket.id).sort().join(","),
     data.sessions.map((session) => `${session.id}@${session.node_id ?? ""}`).sort().join(","),
     data.dispatches.map((edge) => `${edge.nodeId}>${edge.ticketId}`).sort().join(","),
-    data.subscriptions.map((edge) => `${edge.a}~${edge.b}`).sort().join(","),
   ].join("#");
 }
 
@@ -906,8 +855,7 @@ function clamp(value: number, min: number, max: number): number {
         <path
           v-for="edge in scene.edges"
           :key="edge.key"
-          class="edge"
-          :class="edge.kind === 'dispatch' ? 'edge--dispatch' : 'edge--sub'"
+          class="edge edge--dispatch"
           :d="edge.d"
         />
         <g
@@ -975,12 +923,6 @@ function clamp(value: number, min: number, max: number): number {
         </svg>
         实线派单 · 节点到工单
       </span>
-      <span class="legend__item legend__item--violet">
-        <svg class="legend__icon legend__icon--line" width="28" height="8" viewBox="0 0 28 8" aria-hidden="true">
-          <line class="edge edge--sub" x1="0" y1="4" x2="28" y2="4" />
-        </svg>
-        虚线订阅 · 工单之间
-      </span>
       <p class="legend__hint">点击工单进入工单列表，点击节点或会话查看信息</p>
     </div>
     <p v-if="footnote" class="note">{{ footnote }}</p>
@@ -1027,12 +969,6 @@ function clamp(value: number, min: number, max: number): number {
 .edge--dispatch {
   stroke: var(--cyan);
   stroke-opacity: 0.55;
-}
-
-.edge--sub {
-  stroke: var(--violet);
-  stroke-opacity: 0.8;
-  stroke-dasharray: 5 4;
 }
 
 .glyph {

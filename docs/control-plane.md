@@ -81,7 +81,7 @@ make run-control # 控制面（HTTP）
 
 ## 五、数据
 
-`events`、`threads`、`tickets`、`assignments`、`subscriptions`、`runs`、
+`events`、`threads`、`tickets`、`assignments`、`runs`、
 `prompt_revisions`、`prompt_pointers`、`audit`、`kv`、`sessions`、`session_turns`、
 `dispatches`、`nodes`、`llm_calls`、`agent_messages`。
 

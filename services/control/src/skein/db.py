@@ -63,16 +63,6 @@ CREATE TABLE IF NOT EXISTS assignments (
     FOREIGN KEY (ticket_id) REFERENCES tickets (id)
 );
 
-CREATE TABLE IF NOT EXISTS subscriptions (
-    thread_id   TEXT NOT NULL,
-    ticket_id   TEXT NOT NULL,
-    state       TEXT NOT NULL DEFAULT 'active',
-    created_at  REAL NOT NULL,
-    PRIMARY KEY (thread_id, ticket_id),
-    FOREIGN KEY (thread_id) REFERENCES threads (id),
-    FOREIGN KEY (ticket_id) REFERENCES tickets (id)
-);
-
 CREATE TABLE IF NOT EXISTS runs (
     id          TEXT PRIMARY KEY,
     job         TEXT NOT NULL,
@@ -193,7 +183,6 @@ CREATE INDEX IF NOT EXISTS idx_agent_messages_thread ON agent_messages (thread_i
 CREATE INDEX IF NOT EXISTS idx_events_thread ON events (thread_id);
 CREATE INDEX IF NOT EXISTS idx_tickets_status ON tickets (status);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_tickets_dedup ON tickets (dedup_key) WHERE dedup_key IS NOT NULL;
-CREATE INDEX IF NOT EXISTS idx_subscriptions_thread ON subscriptions (thread_id);
 CREATE INDEX IF NOT EXISTS idx_audit_created ON audit (created_at);
 """
 

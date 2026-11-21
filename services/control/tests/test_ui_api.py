@@ -98,11 +98,6 @@ def seed(conn, blob_root) -> dict:
         ],
     )
     conn.execute(
-        "INSERT INTO subscriptions (thread_id, ticket_id, state, created_at)"
-        " VALUES (?, ?, ?, ?)",
-        ("th1", "tk1", "active", 1000),
-    )
-    conn.execute(
         "INSERT INTO audit (actor, action, detail, created_at) VALUES (?, ?, ?, ?)",
         ("human", "review", '{"ticket_id":"tk1"}', 1700),
     )
@@ -280,7 +275,7 @@ def test_sessions_aggregate_and_turns_text(client):
 
 def test_topology_has_five_keys(client):
     body = client.get("/internal/topology", headers=headers()).json()
-    assert set(body) == {"nodes", "tickets", "dispatches", "sessions", "subscriptions"}
+    assert set(body) == {"nodes", "tickets", "dispatches", "sessions"}
     assert [item["id"] for item in body["nodes"]] == ["n1", "n2"]
     assert body["nodes"][0]["platforms"] == '["forum"]'
     assert set(body["nodes"][0]) == {
@@ -298,9 +293,6 @@ def test_topology_has_five_keys(client):
     assert [item["id"] for item in body["sessions"]] == ["s2", "s1", "s3"]
     assert body["sessions"][0]["last_turn_at"] is None
     assert body["sessions"][1]["last_turn_at"] == 1600
-    assert body["subscriptions"] == [
-        {"thread_id": "th1", "ticket_id": "tk1", "state": "active", "created_at": 1000}
-    ]
 
 
 def test_topology_windows(client):
@@ -322,10 +314,6 @@ def test_topology_windows(client):
         " VALUES (?, NULL, 'n1', 1, 1, ?)",
         [(f"bulk-s{i}", 40_000 + i) for i in range(510)],
     )
-    extra.execute(
-        "INSERT INTO subscriptions (thread_id, ticket_id, state, created_at)"
-        " VALUES ('th1', 'tk2', 'active', 2)"
-    )
     body = client.get("/internal/topology", headers=headers()).json()
     assert len(body["tickets"]) == 200
     assert body["tickets"][0]["id"] == "bulk-t209"
@@ -334,7 +322,6 @@ def test_topology_windows(client):
     assert body["dispatches"][0]["id"] == "bulk-d509"
     assert len(body["sessions"]) == 500
     assert "s1" not in {item["id"] for item in body["sessions"]}
-    assert {item["ticket_id"] for item in body["subscriptions"]} == {"tk1", "tk2"}
 
 
 def test_audit_parses_detail(client):

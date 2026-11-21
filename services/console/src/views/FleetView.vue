@@ -121,7 +121,6 @@ onUnmounted(() => {
       :tickets="topology.tickets"
       :dispatches="topology.dispatches"
       :sessions="topology.sessions"
-      :subscriptions="topology.subscriptions"
     />
   </section>
 </template>

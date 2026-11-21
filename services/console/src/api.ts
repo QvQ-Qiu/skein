@@ -190,19 +190,11 @@ export interface LogRecord {
   message: string;
 }
 
-export interface SubscriptionRecord {
-  thread_id: string;
-  ticket_id: string;
-  state: string;
-  created_at: number;
-}
-
 export interface Topology {
   nodes: NodeRecord[];
   tickets: Ticket[];
   dispatches: Dispatch[];
   sessions: SessionRecord[];
-  subscriptions: SubscriptionRecord[];
 }
 
 export interface TicketList {
