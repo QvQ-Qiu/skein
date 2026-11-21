@@ -18,7 +18,7 @@ from fastapi.responses import JSONResponse, RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from skein import db, prompts, runs, store, watchdog
+from skein import db, llm_trace, prompts, runs, store, watchdog
 from skein.admission import Event, decide, policy_for
 from skein.channel import ChannelHub
 from skein.compat import ForumCompatWriter
@@ -132,6 +132,20 @@ class ChatTicketIn(BaseModel):
     summary: str = ""
 
 
+class LLMCallIn(BaseModel):
+    session_id: str = ""
+    actor: str = ""
+    source: str = ""
+    model: str = ""
+    prompt: str = ""
+    response: str = ""
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
+    latency_ms: int = 0
+    status: str = "ok"
+    error: str = ""
+
+
 def create_app(
     conn: sqlite3.Connection,
     blob_root: str,
@@ -174,6 +188,8 @@ def create_app(
     )
     login_attempts: dict[str, deque[float]] = defaultdict(deque)
     user_secret = qa_user_secret
+    if llm is not None:
+        llm.on_call = lambda call: llm_trace.record(conn, **call)
 
     async def auth(
         request: Request, x_skein_token: str = Header(default="")
@@ -477,6 +493,25 @@ def create_app(
     @app.get("/internal/summary", dependencies=[Depends(auth)])
     def internal_summary() -> dict:
         return build_summary(conn)
+
+    @app.post("/internal/llm/calls", dependencies=[Depends(auth)])
+    def record_llm_call(body: LLMCallIn) -> dict:
+        call_id = llm_trace.record(conn, **body.model_dump())
+        return {"ok": True, "id": call_id}
+
+    @app.get("/internal/llm/calls", dependencies=[Depends(auth)])
+    def list_llm_calls(
+        session_id: str | None = None, source: str | None = None, limit: int = 200
+    ) -> dict:
+        return {
+            "calls": llm_trace.calls(
+                conn, session_id=session_id, source=source, limit=limit
+            )
+        }
+
+    @app.get("/internal/llm/sessions", dependencies=[Depends(auth)])
+    def list_llm_sessions(limit: int = 100) -> dict:
+        return {"sessions": llm_trace.sessions(conn, limit=limit)}
 
     @app.post("/internal/runs", dependencies=[Depends(auth)])
     def start_run(body: RunIn) -> dict:

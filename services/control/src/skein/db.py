@@ -12,7 +12,7 @@ import time
 import uuid
 from pathlib import Path
 
-SCHEMA_VERSION = 7
+SCHEMA_VERSION = 8
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS events (
@@ -177,6 +177,25 @@ CREATE TABLE IF NOT EXISTS dispatches (
 );
 
 CREATE INDEX IF NOT EXISTS idx_dispatches_node ON dispatches (node_id, state);
+
+CREATE TABLE IF NOT EXISTS llm_calls (
+    id                TEXT PRIMARY KEY,
+    session_id        TEXT NOT NULL DEFAULT '',
+    actor             TEXT NOT NULL DEFAULT '',
+    source            TEXT NOT NULL DEFAULT '',
+    model             TEXT NOT NULL DEFAULT '',
+    prompt            TEXT NOT NULL DEFAULT '',
+    response          TEXT NOT NULL DEFAULT '',
+    prompt_tokens     INTEGER NOT NULL DEFAULT 0,
+    completion_tokens INTEGER NOT NULL DEFAULT 0,
+    latency_ms        INTEGER NOT NULL DEFAULT 0,
+    status            TEXT NOT NULL DEFAULT 'ok',
+    error             TEXT NOT NULL DEFAULT '',
+    created_at        REAL NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_llm_calls_session ON llm_calls (session_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_llm_calls_created ON llm_calls (created_at);
 
 CREATE INDEX IF NOT EXISTS idx_events_thread ON events (thread_id);
 CREATE INDEX IF NOT EXISTS idx_tickets_status ON tickets (status);

@@ -513,3 +513,47 @@ export function fetchPodLogs(ns: string, name: string, tail = 200): Promise<K8sP
     `/ops/k8s/pods/${encodeURIComponent(ns)}/${encodeURIComponent(name)}/logs?tail=${tail}`,
   );
 }
+
+export interface LLMCallRecord {
+  id: string;
+  session_id: string;
+  actor: string;
+  source: string;
+  model: string;
+  prompt: string;
+  response: string;
+  prompt_tokens: number;
+  completion_tokens: number;
+  latency_ms: number;
+  status: string;
+  error: string;
+  created_at: number;
+}
+
+export interface LLMSessionRecord {
+  session_id: string;
+  actor: string;
+  source: string;
+  calls: number;
+  tokens: number;
+  first_at: number;
+  last_at: number;
+  model: string;
+  last_status: string;
+}
+
+export function fetchLLMSessions(limit = 100): Promise<{ sessions: LLMSessionRecord[] }> {
+  return request<{ sessions: LLMSessionRecord[] }>(`/internal/llm/sessions?limit=${limit}`);
+}
+
+export function fetchLLMCalls(
+  sessionId: string,
+  limit = 200,
+): Promise<{ calls: LLMCallRecord[] }> {
+  return request<{ calls: LLMCallRecord[] }>(
+    withQuery(
+      "/internal/llm/calls",
+      new URLSearchParams({ session_id: sessionId, limit: String(limit) }),
+    ),
+  );
+}

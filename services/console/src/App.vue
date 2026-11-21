@@ -167,6 +167,7 @@ const RUNS_NAV = [
   { label: "主机", key: "/host" },
   { label: "Pod", key: "/pods" },
   { label: "事件", key: "/events" },
+  { label: "会话", key: "/calls" },
   { label: "信号", key: "/signals" },
 ] as const;
 
@@ -272,7 +273,11 @@ function applyToken() {
 }
 
 const section = computed<"runs" | "platform" | null>(() => {
-  if (["/fleet", "/nodes", "/workers", "/host", "/pods", "/events", "/signals"].includes(route.path)) {
+  if (
+    ["/fleet", "/nodes", "/workers", "/host", "/pods", "/events", "/calls", "/signals"].includes(
+      route.path,
+    )
+  ) {
     return "runs";
   }
   if (["/platform", "/logs"].includes(route.path)) return "platform";
