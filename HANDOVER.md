@@ -1,6 +1,9 @@
 # Skein 交接文档
 
 > 2026-11-19 · 给接手的人：先读这一份，再按需读 `docs/product.md`、`docs/p2.md`、`docs/deployment.md`。
+>
+> **历史文档（2026-11-21 更新）**：旧 P0/P2 Router、`host.py`、`router/`、Outbox 与相关预留接口已删除；
+> 当前模块、接口和环境变量以 `docs/control-plane.md` 为准。本文第 7、8 节仅作历史记录。
 
 ## 1. 这是什么
 
