@@ -19,7 +19,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from skein import db, prompts, runs, store, watchdog
-from skein.admission import Event, decide
+from skein.admission import Event, decide, policy_for
 from skein.channel import ChannelHub
 from skein.compat import ForumCompatWriter
 from skein.host import RouterHost
@@ -124,6 +124,12 @@ class TicketIn(BaseModel):
     platform: str = ""
     dedup_key: str = ""
     dispatch: bool = False
+
+
+class ChatTicketIn(BaseModel):
+    thread_id: str = ""
+    title: str
+    summary: str = ""
 
 
 def create_app(
@@ -311,23 +317,136 @@ def create_app(
         if not principal.internal:
             raise HTTPException(status_code=403, detail="not_internal")
 
-    async def chat_identity_headers(request: Request) -> dict[str, str]:
-        # 集市用户/管理员都能聊天；SSO 有效就带签名身份，失败回退论坛 JWT。
-        if sso_auth is None or not user_secret:
-            return {}
+    async def chat_principal(request: Request) -> Principal | None:
+        if sso_auth is None:
+            return None
         try:
-            principal = await asyncio.to_thread(
+            return await asyncio.to_thread(
                 sso_auth.verify, request.cookies, "market"
             )
         except (SsoRejected, SsoUnavailable):
+            return None
+
+    async def chat_identity_headers(request: Request) -> dict[str, str]:
+        # 集市用户/管理员都能聊天；SSO 有效就带签名身份，失败回退论坛 JWT。
+        if not user_secret:
+            return {}
+        principal = await chat_principal(request)
+        if principal is None:
             return {}
         return {"x-skein-user": sign_user_header(principal, user_secret)}
+
+    async def record_chat_event(request: Request, path: str) -> None:
+        # 只接真正发起任务的消息；bootstrap/close/resume 不算。
+        if path not in ("task", "task/sse", "sse"):
+            return
+        principal = await chat_principal(request)
+        if principal is None:
+            return
+        try:
+            raw = await request.body()
+            payload = json.loads(raw) if raw else {}
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            return
+        if not isinstance(payload, dict):
+            return
+        text = str(
+            payload.get("task") or payload.get("message") or payload.get("prompt") or ""
+        ).strip()
+        if not text:
+            return
+        session_id = (
+            str(payload.get("session_id") or payload.get("thread_id") or "").strip()[:128]
+            or f"user:{principal.sub}"
+        )
+        digest = hashlib.sha256(text.encode()).hexdigest()[:16]
+        event = Event(
+            source="chat",
+            origin_id=f"{session_id}#{digest}",
+            text=text,
+            actor=principal.sub,
+            mentioned=False,
+            in_allowlist=True,
+            parent_id=session_id,
+        )
+        decision = decide(event, policy_for(conn, "chat"))
+        thread_origin, thread_key = store.thread_identity(event)
+        thread_id = store.ensure_thread(conn, thread_origin, thread_key)
+        store.record_event(
+            conn,
+            event.source,
+            event.origin_id,
+            thread_id,
+            {
+                "text": text,
+                "actor": principal.sub,
+                "session_id": session_id,
+                "admin": principal.admin,
+            },
+            decision.verdict.value,
+        )
+
+    @app.post("/api/v1/agent/ticket")
+    async def chat_ticket(body: ChatTicketIn, request: Request) -> dict:
+        """集市用户从对话里显式转工单；只建 staged，不自动派工。"""
+        principal = await chat_principal(request)
+        if principal is None:
+            raise HTTPException(status_code=401, detail="unauthorized")
+        title = body.title.strip()[:120]
+        if not title:
+            raise HTTPException(status_code=400, detail="title_required")
+        summary = body.summary.strip()[:2000]
+        thread_key = body.thread_id.strip()[:128] or f"user:{principal.sub}"
+        digest = hashlib.sha256(
+            f"{principal.sub}|{thread_key}|{title}|{summary}".encode()
+        ).hexdigest()[:32]
+        dedup_key = f"chat:{digest}"
+        existing = store.find_ticket_by_dedup(conn, dedup_key)
+        if existing:
+            row = conn.execute(
+                "SELECT code, status FROM tickets WHERE id = ?", (existing,)
+            ).fetchone()
+            return {
+                "ticket_id": existing,
+                "code": row["code"] if row else "",
+                "status": row["status"] if row else "",
+                "existing": True,
+            }
+        event = Event(
+            source="chat",
+            origin_id=thread_key,
+            text=summary or title,
+            actor=principal.sub,
+            parent_id=thread_key,
+        )
+        thread_origin, thread_id_key = store.thread_identity(event)
+        thread_id = store.ensure_thread(conn, thread_origin, thread_id_key)
+        note = f"{summary}\n\n[chat] user={principal.sub} thread={thread_key}".strip()
+        ticket_id = store.create_ticket(
+            conn, title, thread_id=thread_id, dedup_key=dedup_key, summary=note
+        )
+        db.record_audit(
+            conn,
+            principal.label,
+            "chat.ticket",
+            {"ticket_id": ticket_id, "thread_id": thread_key},
+        )
+        row = conn.execute(
+            "SELECT code, status FROM tickets WHERE id = ?", (ticket_id,)
+        ).fetchone()
+        return {
+            "ticket_id": ticket_id,
+            "code": row["code"] if row else "",
+            "status": row["status"] if row else "",
+            "existing": False,
+        }
 
     @app.api_route("/api/v1/agent/{path:path}", methods=QA_METHODS)
     async def qa_chat_agent(path: str, request: Request) -> StreamingResponse:
         """小秋 chat 面：集市用户/管理员都可；身份头优先，JWT 兜底。"""
         if not qa.enabled_chat:
             raise HTTPException(status_code=503, detail="qa_not_configured")
+        await record_chat_event(request, path)
         return await qa.forward(
             request,
             qa.chat_upstream,
@@ -339,6 +458,7 @@ def create_app(
     async def qa_chat_task(path: str, request: Request) -> StreamingResponse:
         if not qa.enabled_chat:
             raise HTTPException(status_code=503, detail="qa_not_configured")
+        await record_chat_event(request, path)
         return await qa.forward(
             request,
             qa.chat_upstream,

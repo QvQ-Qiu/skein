@@ -140,6 +140,65 @@ def test_chat_strips_client_supplied_identity_header(tmp_path):
     conn.close()
 
 
+def test_chat_records_event_in_one_thread(tmp_path):
+    app, conn, _ = make_app(tmp_path, sso=True, internal=True, admin=False)
+    headers = {"Cookie": "unisso_sid=sess-ok"}
+    with TestClient(app) as client:
+        first = client.post(
+            "/api/v1/agent/task",
+            json={"task": "第一个问题", "session_id": "s1"},
+            headers=headers,
+        )
+        second = client.post(
+            "/api/v1/agent/task",
+            json={"task": "第二个问题", "session_id": "s1"},
+            headers=headers,
+        )
+    assert first.status_code == 200
+    assert second.status_code == 200
+    events = conn.execute(
+        "SELECT origin, origin_id, thread_id, verdict FROM events ORDER BY rowid"
+    ).fetchall()
+    assert len(events) == 2
+    assert {event["origin"] for event in events} == {"chat"}
+    assert {event["verdict"] for event in events} == {"record"}
+    assert events[0]["thread_id"] == events[1]["thread_id"]
+    thread = conn.execute(
+        "SELECT origin, origin_id FROM threads WHERE id = ?",
+        (events[0]["thread_id"],),
+    ).fetchone()
+    assert thread["origin"] == "chat"
+    assert thread["origin_id"] == "s1"
+    conn.close()
+
+
+def test_chat_ticket_is_idempotent_and_staged(tmp_path):
+    app, conn, _ = make_app(tmp_path, sso=True, internal=True, admin=False)
+    headers = {"Cookie": "unisso_sid=sess-ok"}
+    payload = {"thread_id": "s1", "title": "登录坏了", "summary": "点登录没反应"}
+    with TestClient(app) as client:
+        first = client.post("/api/v1/agent/ticket", json=payload, headers=headers)
+        second = client.post("/api/v1/agent/ticket", json=payload, headers=headers)
+    assert first.status_code == 200
+    assert first.json()["status"] == "staged"
+    assert first.json()["existing"] is False
+    assert second.json()["existing"] is True
+    assert first.json()["ticket_id"] == second.json()["ticket_id"]
+    row = conn.execute("SELECT title, status, summary FROM tickets").fetchone()
+    assert row["title"] == "登录坏了"
+    assert row["status"] == "staged"
+    assert "user=u1" in row["summary"]
+    conn.close()
+
+
+def test_chat_ticket_requires_sso(tmp_path):
+    app, conn, _ = make_app(tmp_path)
+    with TestClient(app) as client:
+        response = client.post("/api/v1/agent/ticket", json={"title": "x"})
+    assert response.status_code == 401
+    conn.close()
+
+
 def test_chat_forwards_method_body_and_query(tmp_path):
     app, conn, upstream = make_app(tmp_path)
     with TestClient(app) as client:

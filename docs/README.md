@@ -9,6 +9,10 @@
 3. [plan.md](plan.md) —— 目标、已完成、剩余工作、验收标准
 4. [control-plane.md](control-plane.md) —— 模块清单、接口、环境变量
 
+## 要接小秋
+
+- [chat-events.md](chat-events.md) —— 聊天事件 → Skein 事件/工单的首版契约
+
 ## 要部署或切换
 
 4. [deployment.md](deployment.md) —— venv、env、systemd、数据迁移、切换与回滚

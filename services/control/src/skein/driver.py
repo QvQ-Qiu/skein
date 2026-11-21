@@ -1,4 +1,4 @@
-"""定时作业驱动：到点开工，按 (job, day) 去重，作业在独立线程里跑。"""
+"""定时作业驱动：到点开工，按 (job, 计划分钟) 去重，作业在独立线程里跑。"""
 
 from __future__ import annotations
 
@@ -143,12 +143,13 @@ class Driver:
 
     def tick(self, now: datetime | None = None) -> list[str]:
         now = now or datetime.now()
-        day = now.strftime("%Y-%m-%d")
+        # 用计划分钟做键：同一天内 7 */2 * * * 可以跑多次，重复 tick 仍幂等。
+        slot = now.strftime("%Y-%m-%dT%H:%M")
         started: list[str] = []
         for job in self.due_jobs(now):
             if job in self._active:
                 continue
-            run_id = runs.start(self._conn, job, day)
+            run_id = runs.start(self._conn, job, slot)
             if run_id is None:
                 continue
             command = self._commands.get(job)

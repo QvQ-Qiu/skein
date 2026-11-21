@@ -11,9 +11,11 @@ from skein.admission import Event
 
 
 def thread_identity(event: Event) -> tuple[str, str]:
-    """帖子与它的评论属于同一条 Thread。"""
+    """帖子与它的评论属于同一条 Thread；同一聊天会话也归一条 Thread。"""
     if event.source == "forum_comment":
         return "forum_post", event.parent_id or event.origin_id
+    if event.source == "chat":
+        return "chat", event.parent_id or event.origin_id
     return event.source, event.origin_id
 
 

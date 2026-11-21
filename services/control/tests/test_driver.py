@@ -72,7 +72,7 @@ def test_cron_ranges_and_due_jobs():
     assert not cron_matches("0 9-10 * * 1-5", datetime(2026, 11, 21, 9, 0))
 
 
-def test_tick_runs_command_once_per_day(conn):
+def test_tick_runs_command_once_per_slot(conn):
     runner = FakeRunner()
     driver = Driver(
         conn,
@@ -84,11 +84,27 @@ def test_tick_runs_command_once_per_day(conn):
     now = datetime(2026, 11, 18, 9, 15)
     assert len(driver.tick(now)) == 1
     assert runner.calls == [("python main.py daily", 4 * 3600)]
-    run = runs.by_day(conn, "daily", "2026-11-18")
+    run = runs.by_day(conn, "daily", "2026-11-18T09:15")
     assert run.status == "succeeded"
 
     assert driver.tick(now) == []
     assert len(runner.calls) == 1
+
+
+def test_tick_allows_two_slots_same_day(conn):
+    runner = FakeRunner()
+    driver = Driver(
+        conn,
+        parse_schedules('[{"job":"ingest","cron":"7 */2 * * *"}]'),
+        {"ingest": "true"},
+        runner=runner,
+        inline=True,
+    )
+    assert len(driver.tick(datetime(2026, 11, 18, 0, 7))) == 1
+    assert len(driver.tick(datetime(2026, 11, 18, 2, 7))) == 1
+    assert len(runner.calls) == 2
+    assert runs.by_day(conn, "ingest", "2026-11-18T00:07").status == "succeeded"
+    assert runs.by_day(conn, "ingest", "2026-11-18T02:07").status == "succeeded"
 
 
 def test_missing_command_is_skipped(conn):
@@ -100,7 +116,7 @@ def test_missing_command_is_skipped(conn):
         inline=True,
     )
     assert driver.tick(datetime(2026, 11, 18, 10, 20)) == []
-    run = runs.by_day(conn, "curator", "2026-11-18")
+    run = runs.by_day(conn, "curator", "2026-11-18T10:20")
     assert run.status == "skipped"
 
 
@@ -113,4 +129,4 @@ def test_failed_command_marks_failed(conn):
         inline=True,
     )
     driver.tick(datetime(2026, 11, 18, 9, 15))
-    assert runs.by_day(conn, "daily", "2026-11-18").status == "failed"
+    assert runs.by_day(conn, "daily", "2026-11-18T09:15").status == "failed"
