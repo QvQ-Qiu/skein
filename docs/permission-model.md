@@ -69,6 +69,7 @@ u["is_super_admin"] = JsonValue(user.isSuperAdmin);
 - 2026-11-21 已构建并重启 `deploy-5829cb069e42fd20`；自检 E2E 账号返回
   `internal=true, is_admin=false`（集市用户），说明字段生效。
 - 当前 unisso 库里 `is_admin=1` 的活跃账号有 3 个；控制台只认这些账号。
+- 代码提交：unisso `260021c`（`SysuMirror/unisso`，已推送）。
 
 ## 4. 部署
 
@@ -76,6 +77,14 @@ u["is_super_admin"] = JsonValue(user.isSuperAdmin);
 - 小秋 chat：`/etc/skein/xiaoqiu-chat.env` 的 `SKEIN_USER_SECRET`。
 - 两者必须是同一个随机值（600，不进仓库）。
 - 顺序：unisso（已做）→ 小秋镜像 → 控制面。小秋未配 secret 时忽略头、回退 JWT，滚动发布安全。
+
+### 部署状态（2026-11-21）
+
+- 控制面 `5588dab`、chat 镜像 `xiaoqiu:1.0.93-skein-admin` 已上线，chat healthy。
+- E2E 集市账号：控制台登录 403 `not_admin`；`surface=market` 200；market cookie 访问
+  console / internal / ops 均 403；chat bootstrap（不带 JWT）200，close 200。
+- 管理员控制台未用真实管理员账号实测；unisso 中 `is_admin=1` 的活跃账号 3 个，
+  代码路径有单测覆盖。
 
 ## 5. 验收
 
