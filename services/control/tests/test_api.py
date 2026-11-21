@@ -20,7 +20,7 @@ def client(tmp_path):
         calls.append((kind, object_))
         return {"ok": True}
 
-    app = create_app(conn, str(tmp_path / "blobs"), TOKEN, writer, forum_base="http://forum.test")
+    app = create_app(conn, str(tmp_path / "blobs"), TOKEN, writer)
     with TestClient(app) as c:
         c.calls = calls
         yield c
@@ -185,20 +185,6 @@ def test_prompt_freezes_after_two_rollbacks(client):
     ).status_code == 200
 
 
-def test_console_is_served(client):
-    page = client.get("/console/")
-    assert page.status_code == 200
-    assert "Skein 控制台" in page.text or "雁阵" in page.text
-    root = client.get("/", follow_redirects=True)
-    assert root.status_code == 200
-    assert "Skein 控制台" in root.text or "雁阵" in root.text
-    legacy = client.get("/console-legacy/")
-    assert legacy.status_code == 200
-    assert "雁阵" in legacy.text
-    assert client.get("/console-legacy/app.js").status_code == 200
-    assert client.get("/console-legacy/style.css").status_code == 200
-
-
 def test_emit_requires_forum_config(tmp_path):
     conn = db.connect(tmp_path / "api-no-forum.db")
     db.migrate(conn)
@@ -209,5 +195,5 @@ def test_emit_requires_forum_config(tmp_path):
             json={"key": "k1", "kind": "post", "object": "day:1", "payload": {}},
             headers=auth(),
         )
-        assert response.status_code == 503
+        assert response.status_code == 200
     conn.close()

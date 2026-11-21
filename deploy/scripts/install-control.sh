@@ -1,24 +1,16 @@
 #!/usr/bin/env bash
-# Skein 控制面正式安装：迁移正式库 → 写 /etc/skein/env → 装 systemd → 启动 → 自检。
-# 只做加法：不删旧服务（yanzhen），不动 node-agent，不开派单（SKEIN_DISPATCH 默认 0）。
+# Skein 控制面正式安装：初始化库 → 写 /etc/skein/env → 装 systemd → 启动 → 自检。
 # 幂等：重复执行会覆盖 /etc/skein/env 与 unit（各自留 .bak-<ts> 备份）。
 set -euo pipefail
 
 SKEIN_REPO=${SKEIN_REPO:-/root/skein}
 SKEIN_ENV=${SKEIN_ENV:-/etc/skein/env}
 SKEIN_DB=${SKEIN_DB:-/srv/skein/skein.db}
-OLD_DB=${OLD_DB:-/root/yanzhen/data/yanzhen.db}
 UNIT=${UNIT:-/etc/systemd/system/skein-control.service}
 TS=$(date +%Y%m%d%H%M%S)
 
-echo "== 1/5 迁移正式库（已存在则跳过迁移，只补齐表结构） =="
+echo "== 1/5 初始化库 =="
 install -d -m 700 /srv/skein
-if [ -f "$SKEIN_DB" ]; then
-  echo "  已有 $SKEIN_DB，不重跑迁移"
-else
-  python3 "$SKEIN_REPO/deploy/scripts/migrate_yanzhen.py" --old "$OLD_DB" --new "$SKEIN_DB" --dry-run
-  python3 "$SKEIN_REPO/deploy/scripts/migrate_yanzhen.py" --old "$OLD_DB" --new "$SKEIN_DB"
-fi
 
 echo "== 2/5 写 $SKEIN_ENV =="
 install -d -m 700 /etc/skein
@@ -28,10 +20,12 @@ if [ -f "$SKEIN_ENV" ]; then cp "$SKEIN_ENV" "$SKEIN_ENV.bak-$TS"; fi
   echo "SKEIN_BLOB_ROOT=/srv/skein/blobs"
   echo "SKEIN_PORT=7800"
   echo "SKEIN_TOKEN=$(python3 -c 'import secrets; print(secrets.token_urlsafe(32))')"
-  echo "SKEIN_SHADOW=0"
   echo "SKEIN_DISPATCH=0"
   echo "SKEIN_FORUM_BASE=http://127.0.0.1:8080"
   echo "SKEIN_FORUM_TOKEN=${SKEIN_FORUM_TOKEN:-}"
+  echo "SKEIN_LLM_BASE=${SKEIN_LLM_BASE:-https://api.ssemarket.cn/v1}"
+  echo "SKEIN_LLM_KEY=${SKEIN_LLM_KEY:-}"
+  echo "SKEIN_AGENT_MODEL=${SKEIN_AGENT_MODEL:-qwen-3.8-flash}"
   echo "SKEIN_SSO_BASE=https://sso.ssemarket.cn"
   if [ -f /root/unisso-migration/clients/skein.env ]; then
     # 凭据只落 env 文件，不回显
@@ -49,6 +43,8 @@ if [ -f "$SKEIN_ENV" ]; then cp "$SKEIN_ENV" "$SKEIN_ENV.bak-$TS"; fi
 } > "$SKEIN_ENV"
 chmod 600 "$SKEIN_ENV"
 grep -q '^SKEIN_SSO_CLIENT_ID=' "$SKEIN_ENV" && echo "  SSO 凭据已并入" || echo "  未发现 clients/skein.env，先按令牌模式跑（SSO 注册后再补）"
+chmod 700 "$SKEIN_REPO/deploy/scripts/backup-skein.sh" 2>/dev/null || true
+(crontab -l 2>/dev/null | grep -v 'backup-skein.sh'; echo "17 3 * * * $SKEIN_REPO/deploy/scripts/backup-skein.sh") | crontab -
 
 echo "== 3/5 装 systemd unit =="
 if [ -f "$UNIT" ]; then cp "$UNIT" "$UNIT.bak-$TS"; fi

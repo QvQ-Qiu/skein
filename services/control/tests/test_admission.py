@@ -17,7 +17,6 @@ from skein.admission import (
     policy_from_dict,
     policy_to_dict,
 )
-from skein.ingest import Ingestor, RawItem
 from skein.store import kv_set
 
 
@@ -173,48 +172,3 @@ def test_load_policies_ignores_bad_json(conn):
     assert load_policies(conn) == {"default": _defaults(), "sources": {}}
     kv_set(conn, POLICIES_KEY, "[]")
     assert policy_for(conn, "forum_post") == DEFAULT_POLICY
-
-
-class _Source:
-    name = "forum"
-
-    def __init__(self, items):
-        self._items = items
-
-    def fetch(self, since, limit):
-        return list(self._items)
-
-
-def test_ingestor_uses_source_policy(conn):
-    kv_set(
-        conn,
-        POLICIES_KEY,
-        json.dumps(
-            {
-                "default": _defaults(),
-                "sources": {"forum_comment": {"accept": False}},
-            }
-        ),
-    )
-    items = [
-        RawItem(
-            source="forum_post",
-            origin_id="p1",
-            text="帮我看下",
-            created_at=1,
-            mentioned=True,
-        ),
-        RawItem(
-            source="forum_comment",
-            origin_id="c1",
-            text="帮我看下",
-            created_at=2,
-            mentioned=True,
-        ),
-    ]
-    assert Ingestor(conn, _Source(items)).poll() == 2
-    verdicts = {
-        row["origin_id"]: row["verdict"]
-        for row in conn.execute("SELECT origin_id, verdict FROM events")
-    }
-    assert verdicts == {"p1": "process", "c1": "ignore"}

@@ -27,7 +27,4 @@ def summary(conn: sqlite3.Connection) -> dict:
         "runs": {
             "by_status": _group(conn, "SELECT status, COUNT(*) FROM runs GROUP BY status"),
         },
-        "shadow": {
-            "by_action": _group(conn, "SELECT action, COUNT(*) FROM shadow_decisions GROUP BY action"),
-        },
     }

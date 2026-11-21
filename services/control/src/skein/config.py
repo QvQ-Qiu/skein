@@ -16,17 +16,11 @@ class Config:
     port: int = 7800
     direct_model: str = "direct"
     route_model: str = "route"
+    agent_model: str = "qwen-3.8-flash"
     forum_base: str = "http://127.0.0.1:8080"
     forum_token: str = ""
     llm_base: str = ""
     llm_key: str = ""
-    forum_db_host: str = "127.0.0.1"
-    forum_db_port: int = 3506
-    forum_db_user: str = ""
-    forum_db_password: str = ""
-    forum_db_name: str = "ssemarket"
-    poll_interval: int = 60
-    shadow: bool = False
     dispatch: bool = False
     schedules: str = ""
     job_commands: str = ""
@@ -34,9 +28,6 @@ class Config:
     driver_enabled: bool = False
     job_timeout: int = 14400
     platform_repos: dict[str, str] = field(default_factory=dict)
-    router_session: bool = False
-    router_batch: int = 8
-    router_interval: float = 0.5
     control_url: str = ""
     watchdog: bool = False
     watchdog_auto: bool = False
@@ -79,17 +70,11 @@ class Config:
             port=int(source.get("SKEIN_PORT", base.port)),
             direct_model=source.get("SKEIN_DIRECT_MODEL", base.direct_model),
             route_model=source.get("SKEIN_ROUTE_MODEL", base.route_model),
+            agent_model=source.get("SKEIN_AGENT_MODEL", base.agent_model),
             forum_base=source.get("SKEIN_FORUM_BASE", base.forum_base),
             forum_token=source.get("SKEIN_FORUM_TOKEN", base.forum_token),
             llm_base=source.get("SKEIN_LLM_BASE", base.llm_base),
             llm_key=source.get("SKEIN_LLM_KEY", base.llm_key),
-            forum_db_host=source.get("SKEIN_FORUM_DB_HOST", base.forum_db_host),
-            forum_db_port=int(source.get("SKEIN_FORUM_DB_PORT", base.forum_db_port)),
-            forum_db_user=source.get("SKEIN_FORUM_DB_USER", base.forum_db_user),
-            forum_db_password=source.get("SKEIN_FORUM_DB_PASSWORD", base.forum_db_password),
-            forum_db_name=source.get("SKEIN_FORUM_DB_NAME", base.forum_db_name),
-            poll_interval=int(source.get("SKEIN_POLL_INTERVAL", base.poll_interval)),
-            shadow=source.get("SKEIN_SHADOW", "0") in ("1", "true", "yes"),
             dispatch=source.get("SKEIN_DISPATCH", "0") in ("1", "true", "yes"),
             schedules=source.get("SKEIN_SCHEDULES", base.schedules),
             job_commands=source.get("SKEIN_JOB_COMMANDS", base.job_commands),
@@ -97,12 +82,6 @@ class Config:
             driver_enabled=source.get("SKEIN_DRIVER", "0") in ("1", "true", "yes"),
             job_timeout=int(source.get("SKEIN_JOB_TIMEOUT", base.job_timeout)),
             platform_repos=platform_repos,
-            router_session=source.get("SKEIN_ROUTER_SESSION", "0")
-            in ("1", "true", "yes"),
-            router_batch=int(source.get("SKEIN_ROUTER_BATCH", base.router_batch)),
-            router_interval=float(
-                source.get("SKEIN_ROUTER_INTERVAL", base.router_interval)
-            ),
             control_url=source.get("SKEIN_CONTROL_URL", base.control_url),
             watchdog=source.get("SKEIN_WATCHDOG", "0") in ("1", "true", "yes"),
             watchdog_auto=source.get("SKEIN_WATCHDOG_AUTO", "0")

@@ -1,6 +1,7 @@
 import { createRouter, createWebHashHistory } from "vue-router";
 import TodayView from "./views/TodayView.vue";
 import AboutView from "./views/AboutView.vue";
+import AgentView from "./views/AgentView.vue";
 import TicketsView from "./views/TicketsView.vue";
 import SignalsView from "./views/SignalsView.vue";
 import FleetView from "./views/FleetView.vue";
@@ -18,6 +19,7 @@ export const router = createRouter({
   routes: [
     { path: "/", redirect: "/today" },
     { path: "/today", component: TodayView },
+    { path: "/agent", component: AgentView },
     { path: "/about", component: AboutView },
     { path: "/tickets", component: TicketsView },
     { path: "/tickets/:id", component: TicketsView },

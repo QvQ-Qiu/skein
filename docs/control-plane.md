@@ -1,131 +1,96 @@
 # 控制面（services/control）
 
-> 2026-11-18 · 对应 `docs/architecture.md` 的落地状态
+> 2026-11-21 · 重构后的当前状态：无秋坞、无影子、无旧版兼容；控制面只做雁阵自己的事。
 
-## 一、已经实现的
+## 一、模块
 
 | 模块 | 文件 | 说明 |
 | --- | --- | --- |
-| 领域库 | `skein/db.py` | SQLite，schema v5，11 张表，外键开启、WAL |
-| 准入矩阵 | `skein/admission.py` | 确定性三档：ignore / record / process；不调模型 |
-| 直答契约 | `skein/router/direct.py` | 请求冻结 + 序列化复核；响应深检；工具调用一律降级 dispatch |
-| 事件分派 | `skein/router/dispatch.py` | 工具集写死为 route/attach/ignore/stop/note |
-| Router 宿主 | `skein/host.py` | 聊天直答、事件分派；建单与审计同一事务 |
-| Session 权威 | `skein/session_store.py` | 索引行 + 内容寻址文件；按轮幂等；节点钉住 |
-| Outbox | `skein/outbox.py` | 单次写、失败落库、重启对账 |
-| HTTP 接口 | `skein/api.py` | 健康、聊天、transcript、写回、概览 |
-| 采集 | `skein/ingest.py`、`skein/forum_source.py` | 公开视图 → Trigger；水位；Thread 归并 |
-| 影子派单 | `skein/shadow.py` | 真模型判断，只记录，零副作用 |
-| 节点通道 | `skein/channel.py` | WebSocket：注册、心跳、建 worker、派单、回报 |
+| 领域库 | `skein/db.py` | SQLite WAL，schema v9；工单/线程/事件/运行/调用/Agent 消息 |
+| 准入 | `skein/admission.py` | 确定性 ignore/record/process；不调模型 |
+| Router | `skein/host.py`、`skein/router/direct.py`、`dispatch.py` | 直答 + 事件分派；工具集 route/attach/ignore/stop/note |
+| 控制台 Agent | `skein/agent.py` | 管理员用自然语言查/操作雁阵；工具调用 + 审计 + 调用留痕 |
+| 工单/线程 | `skein/store.py` | Thread 归并、建单、订阅、去重 |
+| 节点通道 | `skein/channel.py` | WebSocket 注册/心跳/建 worker/派单/结果；多节点 |
 | 调度 | `skein/scheduler.py` | 在线窗口、容量、平台匹配 |
-| 作业驱动 | `skein/driver.py`、`skein/runs.py` | 到点开工、按 (job, day) 去重、线程执行 |
-| 写入口兼容 | `skein/compat.py` | 加精按帖幂等、发帖按内容哈希幂等 |
-| Watchdog | `skein/watchdog.py`、`skein/prompts.py` | 信号只读真值；提示词修订走金丝雀与冻结 |
-| 面板 | `services/console/` | 静态页，由控制面托管在 `/console/` |
-| 通道 | `skein/channels.py` | 论坛内部口写入，禁用系统代理 |
-| 模型客户端 | `skein/llm_http.py` | OpenAI 兼容网关，强制 JSON |
+| 定时作业 | `skein/driver.py`、`runs.py` | cron 到点执行，按计划分钟去重 |
+| Watchdog | `skein/watchdog.py`、`watchdog_agent.py` | 确定性信号 + 自动建单 + 每日巡检 |
+| 会话权威 | `skein/session_store.py` | 索引 + 内容寻址 blob；逐轮幂等 |
+| 出站 | `skein/outbox.py`、`channels.py` | 对外写单次、失败落库、重启对账 |
+| SSO | `skein/sso.py` | UniSSO 内接；internal=集市用户、is_admin=管理员 |
+| 小秋门面 | `skein/qa_proxy.py` | chat/ops 上游代理；chat 带签名身份头 |
+| 调用留痕 | `skein/llm_trace.py`、`llm_http.py` | 每次模型调用的输入/输出/tokens/耗时 |
+| 控制台 | `services/console/` | Vue 3；工作台/Agent/需求/运行/平台 |
 
-## 二、还没实现的
+已删除：`poll.py`、`ingest.py`、`forum_source.py`（改为小秋 intake）、
+`shadow.py`、`review.py`（影子对比）、`compat.py`（旧 yanzhen 写入口）、
+`router/runtime.py`、`router/session.py`（常驻 Router 批处理，未上线）、
+`services/console/legacy`、`deploy/p0`、`migrate_yanzhen.py`。
 
-- **Watchdog**：信号采集、金丝雀、提示词写入都没做。
-- **集市云执行环境**：YatTerra 客户端未写，token 未拿到。
-- **面板**：`services/console` 还是旧代码，未接新接口。
-
-## 三、怎么跑
+## 二、跑与测
 
 ```bash
-make test        # 76 个测试
+make test        # 单元测试
 make lint        # ruff
 make run-control # 控制面（HTTP）
-make run-poll    # 采集循环
 ```
 
-### 环境变量
+## 三、环境变量
 
 | 变量 | 默认 | 用途 |
 | --- | --- | --- |
 | `SKEIN_DB` | `data/skein.db` | 领域库路径 |
 | `SKEIN_BLOB_ROOT` | `data/blobs` | transcript 内容寻址目录 |
-| `SKEIN_TOKEN` | 空 | 内部接口令牌；为空则全部 401 |
-| `SKEIN_PORT` | `7700` | 控制面监听端口（仅 127.0.0.1） |
-| `SKEIN_DIRECT_MODEL` | `direct` | 直答模型 |
-| `SKEIN_ROUTE_MODEL` | `route` | 事件分派模型 |
-| `SKEIN_LLM_BASE` / `SKEIN_LLM_KEY` | 空 | 模型网关 |
-| `SKEIN_FORUM_BASE` / `SKEIN_FORUM_TOKEN` | `http://127.0.0.1:8080` / 空 | 论坛写入口 |
-| `SKEIN_FORUM_DB_*` | 本机 3506 | 论坛只读库（采集用） |
-| `SKEIN_POLL_INTERVAL` | `60` | 采集间隔（秒） |
-| `SKEIN_SHADOW` | `0` | 开影子派单；需要模型网关 |
-| `SKEIN_DISPATCH` | `0` | 开真派单：放行事件建单 |
-| `SKEIN_SCHEDULES` | 空 | 作业时刻表 JSON：`[{"job":"daily","at":"09:15"}]` |
-| `SKEIN_JOB_COMMANDS` | 空 | 作业命令 JSON：`{"daily":"python main.py daily"}` |
-| `SKEIN_DRIVER` | `0` | 启动定时作业线程 |
-| `SKEIN_JOB_TIMEOUT` | `14400` | 单个作业最长运行秒数 |
-| `SKEIN_PLATFORM_REPOS` | 空 | 平台 → 节点仓库路径的 JSON |
+| `SKEIN_TOKEN` | 空 | 内部/节点令牌；为空则机器接口 401 |
+| `SKEIN_HOST` / `SKEIN_PORT` | `127.0.0.1` / `7800` | 监听地址 |
+| `SKEIN_LLM_BASE` / `SKEIN_LLM_KEY` | 空 | OpenAI 兼容网关；Router 与 Agent 共用 |
+| `SKEIN_AGENT_MODEL` | `qwen-3.8-flash` | 控制台 Agent 模型 |
+| `SKEIN_FORUM_BASE` / `SKEIN_FORUM_TOKEN` | `http://127.0.0.1:8080` / 空 | 出站写回 |
+| `SKEIN_DISPATCH` | `0` | 事件是否自动建单（当前人工/Agent 建单） |
+| `SKEIN_DRIVER` / `SKEIN_JOBS_FILE` | `0` / 空 | 定时作业驱动 |
+| `SKEIN_PLATFORM_REPOS` | 空 | 平台 → 仓库路径 JSON |
+| `SKEIN_WATCHDOG*` | 关 | 信号、自动建单、每日巡检 |
+| `SKEIN_SSO_*` | 空 | UniSSO 内接 |
+| `SKEIN_QA_CHAT_UPSTREAM` / `SKEIN_QA_OPS_UPSTREAM` | 空 | 小秋 chat/ops 上游 |
+| `SKEIN_ASSERTION_KEY` | 空 | chat 身份头签名，与小秋 `SKEIN_USER_SECRET` 相同 |
+| `SKEIN_OPS_PANEL_SECRET` | 空 | 给 ops 上游代签面板会话 |
 
 ## 四、接口
 
 | 方法 | 路径 | 鉴权 | 说明 |
 | --- | --- | --- | --- |
 | GET | `/health/live` | 无 | 存活 |
-| POST | `/internal/chat` | 有 | 聊天直答/分派 |
-| POST | `/internal/worker/turn` | 有 | transcript 上传（base64） |
-| POST | `/internal/outbox/emit` | 有 | 对外写，单次 |
-| GET | `/internal/summary` | 有 | 计数概览 |
-| GET | `/internal/stream` | 有 | SSE 实时快照：数据变了才推，静默时 15s 一次心跳 |
-| GET | `/api/session` | 无 | 会话探测：sso 模式回验 Cookie；没配 SSO 返回 `{"mode":"token"}` |
-| POST | `/api/session/login` | 无 | 邮箱+密码 → password/verify → 种共享 Cookie（每 IP 10 次/分） |
-| POST | `/api/session/logout` | 无 | session/revoke + 双名清 Cookie |
-| POST | `/internal/tickets/{id}/dispatch` | 有 | 派给在线节点 |
-| POST | `/internal/tickets` | 有 | 外部控制回路建单：dedup 幂等，可带 summary 与直接派单 |
-| POST | `/internal/tickets/{id}/review` | 有 | approve / reject |
-| POST | `/internal/runs` | 有 | 开一次作业运行（按 job+day 去重） |
-| POST | `/internal/runs/{id}/finish` | 有 | 落运行结果 |
-| GET | `/internal/runs` | 有 | 最近运行 |
-| GET | `/internal/tickets` | 有 | 工单列表（可按状态筛） |
-| GET | `/internal/nodes` | 有 | 节点列表 |
-| GET | `/internal/signals` | 有 | Watchdog 信号 |
-| GET | `/internal/prompts` | 有 | 提示词指针状态 |
-| POST | `/internal/prompts/propose` | 有 | 提出修订（走金丝雀） |
-| POST | `/internal/prompts/promote` | 有 | 升格到稳定 |
-| POST | `/internal/prompts/rollback` | 有 | 回退 |
-| POST | `/internal/prompts/unfreeze` | 有 | 人工解冻 |
-| POST | `/internal/featured` | X-Internal-Token | 兼容：批量加精，按帖幂等 |
-| POST | `/api/auth/post` | Bearer 透传 | 兼容：用户发帖，按内容哈希幂等 |
+| GET | `/health/ready` | 无 | DB 就绪 |
+| GET | `/api/session` | 无 | SSO 探测；`surface=market` 放集市用户 |
+| POST | `/api/session/login` | 无 | 邮箱+密码 → UniSSO → Cookie |
+| POST | `/api/session/logout` | 无 | 单点登出 + 双清 Cookie |
+| POST | `/api/v1/agent/ticket` | 集市 SSO | 从对话显式转工单（staged） |
+| POST/GET | `/api/v1/agent/*`、`/task/*` | chat 上游 | 小秋 chat 代理 |
+| GET/POST | `/ops/*` | 管理员 | 小秋 ops 感知代理 |
+| GET | `/internal/summary` | 令牌/管理员 | 计数概览 |
+| GET | `/internal/stream` | 令牌/管理员 | SSE 快照 |
+| POST | `/internal/tickets` | 令牌 | 外部建单（Watchdog/脚本） |
+| POST | `/internal/tickets/{id}/dispatch` | 令牌/管理员 | 派给节点 |
+| POST | `/internal/tickets/{id}/cancel` | 令牌/管理员 | 取消在途派工 |
+| POST | `/internal/tickets/{id}/review` | 管理员 | approve / reject |
+| POST | `/internal/agent/chat` | 管理员 SSO | 控制台 Agent 对话 |
+| GET | `/internal/agent/thread/{id}` | 管理员 SSO | Agent 历史 |
+| POST | `/internal/llm/calls` | 令牌 | 上报一次模型调用 |
+| GET | `/internal/llm/sessions` / `calls` | 令牌/管理员 | 会话与调用明细 |
+| POST | `/internal/runs`、`runs/{id}/finish` | 令牌 | 作业运行记录 |
+| GET | `/internal/nodes` / `signals` / `prompts` | 令牌/管理员 | 节点/信号/提示词 |
+| POST | `/internal/worker/turn` | 令牌 | transcript 上传 |
+| POST | `/internal/outbox/emit` | 令牌 | 对外写一次 |
 | WS | `/api/agent/channel` | 协议内 token | 节点反向拨入 |
-
-节点协议（与旧雁阵兼容）：`node.register` / `node.heartbeat` / `worker.created` / `ack` / `result`；服务端下发 `worker.create` / `dispatch`。
-
-鉴权头：`X-Skein-Token`。
 
 ## 五、数据
 
-领域库里的表：`events`、`threads`、`tickets`、`assignments`、`subscriptions`、`runs`、`effects`、`prompt_revisions`、`prompt_pointers`、`audit`、`kv`、`sessions`、`session_turns`、`shadow_decisions`。
+`events`、`threads`、`tickets`、`assignments`、`subscriptions`、`runs`、`effects`、
+`prompt_revisions`、`prompt_pointers`、`audit`、`kv`、`sessions`、`session_turns`、
+`dispatches`、`nodes`、`llm_calls`、`agent_messages`。
 
-三份权威的边界不混：transcript 在内容寻址文件，工单在领域库，帖与评论在论坛 MySQL。
+## 六、高可用与备份
 
-## 六、影子对比
-
-影子派单只记录判断，是否可靠要靠人工对照：
-
-```bash
-make review-export   # 导出待标注样本到 labels.csv
-# 填写 expected_action 列（route / attach / ignore / stop / note）
-make review-report   # 输出一致率、混淆矩阵与分歧列表
-```
-
-报告包含：影子总数、已标注数、覆盖率、一致率、混淆矩阵（行=人工，列=模型）以及前 20 条分歧。
-
-## 七、面板
-
-控制面托管一个静态页：`http://127.0.0.1:7700/console/`。
-
-- 首次打开在右上角填 `SKEIN_TOKEN`，存在 localStorage；
-- 六个视图：概览、工单、节点、运行、信号、提示词；
-- 工单页可直接通过/驳回；提示词页可升格、回退、解冻。
-
-页面不打包、不引依赖，改完刷新即可。
-
-## 八、下一步
-
-- Watchdog 的自动提议（依据信号让模型改写 Worker 提示词）还没接；
-- 面板后续按新信息架构迁到 Vue 3 + naive-ui（`services/console` 目录已留好）。
+- `skein-control` systemd `Restart=always`；节点 WebSocket 自动重连，重启不丢状态。
+- 每日 `deploy/scripts/backup-skein.sh` 用 SQLite backup API 备份到 `/srv/skein/backups`，保留 7 天。
+- 单机 SQLite 仍是单写点；要多控制面需换 Postgres。当前规模用「进程自愈 + 每日备份 + 多节点执行」满足。

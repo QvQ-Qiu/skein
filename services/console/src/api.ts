@@ -119,7 +119,6 @@ export interface Summary {
   effects: { by_state: Record<string, number> };
   sessions: number;
   runs: { by_status: Record<string, number> };
-  shadow: { by_action: Record<string, number> };
 }
 
 export interface ControlEvent {
@@ -556,4 +555,33 @@ export function fetchLLMCalls(
       new URLSearchParams({ session_id: sessionId, limit: String(limit) }),
     ),
   );
+}
+
+export interface AgentMessageRecord {
+  role: string;
+  content: string;
+  created_at?: number;
+}
+
+export interface AgentThread {
+  thread_id: string;
+  actor?: string;
+  messages: AgentMessageRecord[];
+}
+
+export interface AgentChatResp {
+  thread_id: string;
+  reply: string;
+  tools: string[];
+}
+
+export function fetchAgentThread(threadId: string): Promise<AgentThread> {
+  return request<AgentThread>(`/internal/agent/thread/${encodeURIComponent(threadId)}`);
+}
+
+export function sendAgentMessage(threadId: string, message: string): Promise<AgentChatResp> {
+  return request<AgentChatResp>("/internal/agent/chat", {
+    method: "POST",
+    body: JSON.stringify({ thread_id: threadId, message }),
+  });
 }

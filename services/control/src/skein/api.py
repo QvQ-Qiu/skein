@@ -20,10 +20,10 @@ from pydantic import BaseModel, Field
 
 from skein import db, llm_trace, prompts, runs, store, watchdog
 from skein.admission import Event, decide, policy_for
+from skein.agent import Agent
 from skein.channel import ChannelHub
-from skein.compat import ForumCompatWriter
 from skein.host import RouterHost
-from skein.outbox import EffectState, EmitResult, Outbox, get
+from skein.outbox import EmitResult, Outbox
 from skein.qa_proxy import QAProxy, sign_user_header
 from skein.session_store import SessionStore, TurnConflict
 from skein.sso import (
@@ -64,10 +64,6 @@ class EmitIn(BaseModel):
 
 class ReviewIn(BaseModel):
     decision: str
-
-
-class FeaturedIn(BaseModel):
-    post_ids: list[int]
 
 
 class RunIn(BaseModel):
@@ -146,6 +142,11 @@ class LLMCallIn(BaseModel):
     error: str = ""
 
 
+class AgentChatIn(BaseModel):
+    thread_id: str = ""
+    message: str
+
+
 def create_app(
     conn: sqlite3.Connection,
     blob_root: str,
@@ -155,8 +156,6 @@ def create_app(
     direct_model: str = "direct",
     route_model: str = "route",
     platform_repos: dict[str, str] | None = None,
-    forum_base: str = "",
-    internal_token: str = "",
     sso_config: SsoConfig | None = None,
     sso_client: Any | None = None,
     qa_chat_upstream: str = "",
@@ -166,13 +165,20 @@ def create_app(
     qa_panel_sub: str = "",
     qa_panel_email: str = "skein@ssemarket.cn",
     qa_user_secret: str = "",
+    llm_base: str = "",
+    llm_key: str = "",
+    agent_model: str = "qwen-3.8-flash",
 ) -> FastAPI:
     app = FastAPI(title="skein-control", version="0.1.0")
     sessions = SessionStore(conn, blob_root)
     outbox = Outbox(conn, writer)
-    compat = Outbox(conn, ForumCompatWriter(forum_base)) if forum_base else None
     host = RouterHost(conn, llm, direct_model, route_model) if llm is not None else None
     hub = ChannelHub(conn, token, platform_repos or {})
+    agent = (
+        Agent(conn, llm_base, llm_key, agent_model, hub)
+        if llm_base and llm_key
+        else None
+    )
     sso_auth: SsoAuth | None = None
     if sso_config is not None and sso_config.enabled:
         if sso_client is None:
@@ -210,6 +216,24 @@ def create_app(
             return principal
         raise HTTPException(status_code=401, detail="unauthorized")
 
+    async def admin_principal(
+        request: Request, x_skein_token: str = Header(default="")
+    ) -> Principal:
+        if token and x_skein_token == token:
+            raise HTTPException(status_code=403, detail="admin_sso_required")
+        if sso_auth is None:
+            raise HTTPException(status_code=401, detail="unauthorized")
+        try:
+            principal = await asyncio.to_thread(
+                sso_auth.verify, request.cookies, "admin"
+            )
+        except SsoRejected as error:
+            raise HTTPException(status_code=error.status, detail=error.code)
+        except SsoUnavailable:
+            raise HTTPException(status_code=503, detail="sso_unavailable")
+        CURRENT_PRINCIPAL.set(principal)
+        return principal
+
     def _login_allowed(ip: str) -> bool:
         now = time.time()
         window = login_attempts[ip]
@@ -225,6 +249,11 @@ def create_app(
     @app.get("/health/live")
     def live() -> dict:
         return {"status": "ok"}
+
+    @app.get("/health/ready")
+    def ready() -> dict:
+        conn.execute("SELECT 1").fetchone()
+        return {"status": "ready"}
 
     @app.get("/api/session")
     async def session_probe(request: Request, surface: str = "console") -> dict:
@@ -513,6 +542,35 @@ def create_app(
     def list_llm_sessions(limit: int = 100) -> dict:
         return {"sessions": llm_trace.sessions(conn, limit=limit)}
 
+    @app.post("/internal/agent/chat", dependencies=[Depends(admin_principal)])
+    async def agent_chat(body: AgentChatIn) -> dict:
+        principal = CURRENT_PRINCIPAL.get()
+        if principal is None:
+            raise HTTPException(status_code=401, detail="unauthorized")
+        if agent is None:
+            raise HTTPException(status_code=503, detail="agent_not_configured")
+        message = body.message.strip()
+        if not message:
+            raise HTTPException(status_code=400, detail="message_required")
+        thread_id = body.thread_id.strip()[:64] or (
+            f"agent-{principal.sub[:12]}-{int(time.time())}"
+        )
+        result = await agent.chat(principal, thread_id, message)
+        return {"thread_id": thread_id, **result}
+
+    @app.get("/internal/agent/thread/{thread_id}", dependencies=[Depends(admin_principal)])
+    async def agent_thread(thread_id: str) -> dict:
+        principal = CURRENT_PRINCIPAL.get()
+        if principal is None:
+            raise HTTPException(status_code=401, detail="unauthorized")
+        key = thread_id[:64]
+        rows = conn.execute(
+            "SELECT role, content, created_at FROM agent_messages"
+            " WHERE thread_id = ? ORDER BY rowid",
+            (key,),
+        ).fetchall()
+        return {"thread_id": key, "actor": principal.sub, "messages": [dict(row) for row in rows]}
+
     @app.post("/internal/runs", dependencies=[Depends(auth)])
     def start_run(body: RunIn) -> dict:
         run_id = runs.start(conn, body.job, body.day)
@@ -658,43 +716,6 @@ def create_app(
         )
         return {"ticket_id": ticket_id, "status": status}
 
-    @app.post("/internal/featured")
-    def compat_featured(body: FeaturedIn, x_internal_token: str = Header(default="")) -> dict:
-        if not internal_token or x_internal_token != internal_token:
-            raise HTTPException(status_code=403, detail="forbidden")
-        if compat is None:
-            raise HTTPException(status_code=503, detail="forum not configured")
-        marked = 0
-        for post_id in body.post_ids:
-            key = f"featured:{post_id}"
-            existing = get(conn, key)
-            if existing and existing.state == EffectState.CONFIRMED:
-                marked += 1
-                continue
-            result = compat.emit(key, "featured", str(post_id), {"token": internal_token})
-            if result != EmitResult.FAILED:
-                marked += 1
-        return {"code": 200, "data": {"marked": marked}}
-
-    @app.post("/api/auth/post")
-    def compat_post(body: dict, authorization: str = Header(default="")) -> dict:
-        if compat is None:
-            raise HTTPException(status_code=503, detail="forum not configured")
-        material = json.dumps(
-            {k: body.get(k) for k in ("title", "content", "partition", "isPrivate", "userTelephone")},
-            sort_keys=True,
-            ensure_ascii=False,
-        )
-        key = "post:" + hashlib.sha256(material.encode()).hexdigest()[:32]
-        existing = get(conn, key)
-        if existing and existing.state == EffectState.CONFIRMED and existing.response:
-            return existing.response
-        result = compat.emit(key, "post", key, {"body": body, "authorization": authorization})
-        if result == EmitResult.FAILED:
-            raise HTTPException(status_code=502, detail="forum write failed")
-        stored = get(conn, key)
-        return stored.response if stored and stored.response else {"code": 200, "data": None}
-
     @app.post("/internal/trigger", dependencies=[Depends(auth)])
     def trigger(body: TriggerIn) -> dict:
         event = Event(
@@ -745,28 +766,17 @@ def create_app(
 
     @app.post("/internal/outbox/emit", dependencies=[Depends(auth)])
     def emit(body: EmitIn) -> dict:
-        if not forum_base:
-            raise HTTPException(status_code=503, detail="forum not configured")
         result = outbox.emit(body.key, body.kind, body.object, body.payload)
         if result == EmitResult.FAILED:
             raise HTTPException(status_code=502, detail="effect failed")
         return {"result": result}
 
     console_root = Path(__file__).resolve().parents[3] / "console"
-    legacy_dir = console_root / "legacy"
     dist_dir = console_root / "dist"
-    # 先挂 /console-legacy，再挂 /console，避免较短前缀截获旧页。
-    if legacy_dir.is_dir():
-        app.mount(
-            "/console-legacy",
-            StaticFiles(directory=str(legacy_dir), html=True),
-            name="console-legacy",
-        )
-    console_dir = dist_dir if dist_dir.is_dir() else legacy_dir
-    if console_dir.is_dir():
+    if dist_dir.is_dir():
         app.mount(
             "/console",
-            StaticFiles(directory=str(console_dir), html=True),
+            StaticFiles(directory=str(dist_dir), html=True),
             name="console",
         )
 

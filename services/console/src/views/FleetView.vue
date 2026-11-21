@@ -18,8 +18,6 @@ let alive = true;
 let seq = 0;
 let timer = 0;
 
-const shadowCount = computed(() => sumValues(summary.value?.shadow.by_action));
-
 const byStatus = computed<Record<string, number>>(
   () => summary.value?.tickets.by_status ?? {},
 );
@@ -31,11 +29,6 @@ const finishedCount = computed(() =>
   ["done", "rejected"].reduce((total, key) => total + (byStatus.value[key] ?? 0), 0),
 );
 
-
-function sumValues(record: Record<string, number> | undefined): number {
-  if (!record) return 0;
-  return Object.values(record).reduce((sum, value) => sum + (Number.isFinite(value) ? value : 0), 0);
-}
 
 function errorMessage(err: unknown): string {
   if (err instanceof Error && err.message) return err.message;
@@ -119,7 +112,6 @@ onUnmounted(() => {
       <div class="metrics__aside">
         <span>事件 <b class="mono">{{ summary.events.total }}</b></span>
         <span>会话 <b class="mono">{{ summary.sessions }}</b></span>
-        <span>影子 <b class="mono">{{ shadowCount }}</b></span>
       </div>
     </div>
 

@@ -4,30 +4,32 @@
 
 ## 一、现状
 
-Vue 应用已经接管 `/console/`，静态页保留为 `/console-legacy/` 兜底。
+Vue 应用挂在 `/console/`；没有 `dist` 就不挂，不再有 legacy 兜底。
 
 | 路由 | 页面 | 数据来源 | 能做什么 |
 | --- | --- | --- | --- |
 | `/today` | 工作台 | summary / topology / tickets / signals / events | 阵眼、流水线、验收、看卡点 |
+| `/agent` | Agent | `/internal/agent/chat` | 管理员用自然语言查/操作雁阵 |
 | `/tickets` | 需求 | `/internal/tickets` | 列表；通过/驳回；派单；详情抽屉 |
 | `/tickets/:id` | 需求详情 | `/internal/tickets/{id}` | 深链直接打开某张单 |
 | `/fleet` | 运行总览 | `/internal/topology` | 力导网：节点 / 工单 / 会话 / 订阅 |
 | `/nodes` | 节点 | `/internal/nodes` | 在线状态、平台、容量、最后心跳 |
 | `/workers` | Worker | `/internal/sessions` | 会话列表；transcript 时间线 |
+| `/calls` | 会话 | `/internal/llm/sessions`、`/internal/llm/calls` | 每次会话与模型调用：输入/输出/tokens/耗时 |
 | `/events` | 事件 | `/internal/events` | 实时流 + 准入判定 + 按 Thread 聚合 |
 | `/signals` | 信号 | `/internal/signals` | 派单超时、作业失败、写回失败、节点离线 |
 | `/platform` | 平台 | `/internal/admission`、`/internal/prompts` | 准入矩阵、提示词升格/回退/解冻 |
 | `/logs` | 日志 | `/internal/logs` | 按组件与级别过滤 |
 | `/about` | 说明 | — | 产品自述与闭环图 |
 
-源码在 `services/console/src/`。构建：`npm ci && npm run build`，产物 `dist/`；控制面启动时优先挂 `dist`，没有构建产物才退回 `legacy/`。
+源码在 `services/console/src/`。构建：`npm ci && npm run build`，产物 `dist/`；控制面启动时只挂 `dist`。
 
 ## 二、目标形态
 
-一级导航按 [product.md](product.md) 收敛为四个工作面：
+一级导航按 [product.md](product.md) 收敛为四个工作面，外加一个管理员 Agent：
 
 ```
-工作台 Today │ 需求 Tickets │ 运行 Fleet │ 平台 Platform
+工作台 Today │ Agent │ 需求 Tickets │ 运行 Fleet │ 平台 Platform
 ```
 
 | 工作面 | 回答什么 | 核心组件 |
@@ -105,7 +107,7 @@ npm ci
 npm run build
 ```
 
-产物在 `services/console/dist`。控制面启动时若发现 `dist`，就把 `/console/` 挂到它；没有则退回 `legacy/`，旧页仍在 `/console-legacy/`。改完重启控制面即可，不需要单独部署前端。
+产物在 `services/console/dist`。控制面启动时把 `/console/` 挂到它；没有 `dist` 就不挂。改完重新 build；静态文件立即生效，不需要单独部署前端。
 
 ## 六、验收标准
 

@@ -41,8 +41,6 @@ def build() -> tuple:
         llm=llm,
         direct_model=cfg.direct_model,
         route_model=cfg.route_model,
-        forum_base=cfg.forum_base,
-        internal_token=cfg.forum_token,
         platform_repos=cfg.platform_repos,
         sso_config=sso,
         qa_chat_upstream=cfg.qa_chat_upstream,
@@ -51,6 +49,9 @@ def build() -> tuple:
         qa_panel_sub=cfg.ops_panel_sub,
         qa_panel_email=cfg.ops_panel_email,
         qa_user_secret=cfg.assertion_key,
+        llm_base=cfg.llm_base,
+        llm_key=cfg.llm_key,
+        agent_model=cfg.agent_model,
     )
     return app, cfg, conn
 

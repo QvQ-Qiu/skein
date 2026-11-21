@@ -155,6 +155,7 @@ const themeOverrides: GlobalThemeOverrides = {
 
 const navItems = [
   { label: "工作台", key: "/today" },
+  { label: "Agent", key: "/agent" },
   { label: "需求", key: "/tickets" },
   { label: "运行", key: "/fleet" },
   { label: "平台", key: "/platform" },
