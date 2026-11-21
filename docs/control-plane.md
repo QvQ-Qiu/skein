@@ -70,7 +70,7 @@ make run-control # 控制面（HTTP）
 | GET | `/internal/summary` | 令牌/管理员 | 计数概览 |
 | GET | `/internal/stream` | 令牌/管理员 | SSE 快照 |
 | POST | `/internal/tickets` | 令牌 | 外部建单（Watchdog/脚本） |
-| POST | `/internal/intake` | 令牌 | 前厅（小秋）建单：来源/thread/requester/摘要；dedup 幂等，评论自动 followup |
+| POST | `/internal/intake` | 令牌 | 前厅（小秋）建单：来源/thread/requester/摘要；dedup 幂等，评论/楼中楼自动 followup |
 | POST | `/internal/tickets/{id}/dispatch` | 令牌/管理员 | 派给节点 |
 | POST | `/internal/tickets/{id}/cancel` | 令牌/管理员 | 取消在途派工 |
 | POST | `/internal/tickets/{id}/review` | 管理员 | approve / reject |

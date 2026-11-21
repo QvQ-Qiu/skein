@@ -79,15 +79,18 @@ SKEIN_TICKET_DAILY_CAP=5
 
 ## 三·五、小秋前厅（论坛闭环）
 
-chat 容器镜像 `xiaoqiu:1.0.102-skein-frontdesk`，host network，监听 `8119`；
+chat 容器镜像 `xiaoqiu:1.0.103-skein-frontdesk`，host network，监听 `8119`；
 `SKEIN_QA_CHAT_UPSTREAM` 指向 `http://127.0.0.1:8119`。
 
 构建：
 
 ```bash
 cd /root/xiaoqiu-build
-docker build -f docker/Dockerfile.skein-frontdesk -t xiaoqiu:1.0.102-skein-frontdesk .
+docker build -f docker/Dockerfile.skein-frontdesk -t xiaoqiu:1.0.103-skein-frontdesk .
 ```
+
+镜像直接覆盖 `app/frontdesk.py` 和 `app/api/internal.py`；`app/main.py` 仍用
+`docker/patch_main_frontdesk.py` 增量打补丁（基础镜像的 main 含其他生产修复，不能整份覆盖）。
 
 容器关键环境（完整 env 以 `docker inspect xiaoqiu-chat` 为准）：
 
@@ -106,8 +109,8 @@ XQ_BOT_UID=95317
 ```
 
 主站 Go 前置：`/internal/xiaoqiu/reply` 已上线，用 `X-Internal-Token` 鉴权，
-以 `XQ_BOT_UID` 身份写 `pcomments`/`ccomments`。契约见
-[`chat-events.md`](chat-events.md)。
+以 `XQ_BOT_UID` 身份写 `pcomments`/`ccomments`；楼中楼响应带 `reply_ccomment_id`
+时用 `ReplyCcommentID` 嵌套回复。契约见 [`chat-events.md`](chat-events.md)。
 
 已知缺口：主站 `XQ_AT_URL` 仍指向旧 chat pod 的 `8110`，@ 小秋触发的旧链路不可用；
 前厅 monitor 不依赖它，直接轮询论坛。

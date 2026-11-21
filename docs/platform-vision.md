@@ -64,8 +64,8 @@ Skein（后厂）── 工单、Router、工雁、验收、Watchdog
 6. **执行**：工雁在 worktree 里修，产出分支/提交/diffstat/自测总结；不推送主分支。
 7. **人审**：管理员在控制台验收；通过才合入/部署；驳回则回到工单。
 8. **公开回写**：Skein 状态变化触发 outbound；小秋在原帖回“已定位/修复中/已修复”，只写公开摘要，不写内部细节。
-9. **跟进（部分实现）**：同帖有活跃工单时，一级评论作为 followup 合并进工单；
-   `ccomments` 监测与独立 followup 接口待做。
+9. **跟进（部分实现）**：同帖有活跃工单时，一级评论和楼中楼作为 followup 合并进工单；
+   独立 followup 接口待做。
 10. **关闭/重开**：修复上线后小秋请用户确认；用户说没修好就重开；工单闭环。
 
 ## 5. 公开状态 vs 内部状态
@@ -122,9 +122,9 @@ staged → assigned → running → review → done / rejected
 
 ### 6.2 用户跟进：小秋 → Skein（部分实现）
 
-当前由 `POST /internal/intake` 自动处理：`source=forum_comment` 且同帖已有非终态工单时，
-摘要追加 followup，返回同一张单，不重复建单。独立
-`POST /internal/tickets/{id}/followup` 与 `ccomments` 监测待做。
+当前由 `POST /internal/intake` 自动处理：`source=forum_comment|forum_ccomment`
+且同帖已有非终态工单时，摘要追加 followup，返回同一张单，不重复建单。
+独立 `POST /internal/tickets/{id}/followup` 接口待做。
 
 ### 6.3 Skein → 小秋：公开回写（已上线）
 
@@ -179,8 +179,8 @@ Skein 在派工/验收时直接调小秋
 
 1. **小秋不是 Router，是 channel worker。** 它只有两个对外动作：`intake` 和
    `notify`；任务怎么拆、派给谁、什么时候停，全部由 Skein 决定。
-2. **Thread 订阅直通（部分实现）。** 同一帖子有活跃工单时，一级评论自动合并为 followup；
-   `ccomments` 与独立 followup 接口待做。
+2. **Thread 订阅直通（部分实现）。** 同一帖子有活跃工单时，一级评论和楼中楼自动合并为
+   followup；独立 followup 接口待做。
 3. **工单是唯一真相。** 小秋不维护“处理到哪了”的状态；状态只从 Skein 读，
    公开话术由模板生成。
 4. **公开/内部两套状态机。** 公开只到“已收到/处理中/已修复/需补充”，
@@ -200,8 +200,8 @@ Skein 在派工/验收时直接调小秋
 - [x] 公开状态回写（处理中/已修复/需补充）；
 - [x] 控制台工单显示来源 thread/message（`origin`/`origin_id`/`requester`）；
 - [x] 论坛帖子 + 评论两个入口；情绪吐槽只回执/记录，不建单；
-- [x] 一级评论在活跃工单下自动合并为 followup；
-- [ ] `ccomments` 监测与独立 followup 接口；
+- [x] 一级评论和楼中楼在活跃工单下自动合并为 followup；
+- [ ] 独立 followup 接口；
 - [ ] 公开回写失败重试（outbox）。
 
 ### Phase B（分诊与体验）
