@@ -45,6 +45,7 @@ docs/                 当前文档
 ```
 
 - 控制台登录走 UniSSO：`password/verify` + 共享会话 Cookie；控制台要求 `is_admin=1`。
+  UniSSO 代码仓 `YatTerra/unisso` 默认分支是 **main**（没有 master）；M2M claims 补丁 `260021c` 已在 main。
 - 当前在线执行节点只有 `n-cloud-skein`；旧的 `n-market-host` 已移除。
 - `skein-control`、`skein-watchdog` 是 systemd 服务；小秋 chat 是 host network Docker 容器。
 - ops 面、`xiaoqiu-ops` 容器、旧 `yanzhen` / `yanzhen-node` 已停止/删除；`/root/yanzhen` 代码目录仍保留。
