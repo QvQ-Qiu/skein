@@ -157,6 +157,7 @@ class IntakeIn(BaseModel):
     source: str
     thread_id: str
     message_id: str = ""
+    parent_id: str = ""
     requester: str = ""
     title: str
     summary: str = ""
@@ -675,6 +676,10 @@ def create_app(
         thread_key = body.thread_id.strip()
         if not thread_key:
             raise HTTPException(status_code=400, detail="thread required")
+        if source == "forum_ccomment" and (
+            not body.parent_id.strip() or not body.message_id.strip()
+        ):
+            raise HTTPException(status_code=400, detail="parent and message required")
         material = (
             f"{source}|{thread_key}|{body.message_id}|{body.requester}"
             f"|{title}|{body.summary}"
@@ -697,7 +702,7 @@ def create_app(
             }
         thread_origin = "chat" if source == "chat" else "forum"
         thread_id = store.ensure_thread(conn, thread_origin, thread_key)
-        if source == "forum_comment":
+        if source in ("forum_comment", "forum_ccomment"):
             active = conn.execute(
                 "SELECT id, code, status, public_status FROM tickets"
                 " WHERE thread_id = ? AND status NOT IN ('done','rejected','cancelled')"
@@ -722,6 +727,7 @@ def create_app(
                         "ticket_id": active["id"],
                         "thread": thread_key,
                         "message": body.message_id,
+                        "parent": body.parent_id,
                         "requester": body.requester,
                     },
                 )
@@ -736,6 +742,8 @@ def create_app(
         origin_id = thread_key
         if source == "forum_comment" and body.message_id:
             origin_id = f"{thread_key}:{body.message_id}"
+        elif source == "forum_ccomment" and body.message_id:
+            origin_id = f"{thread_key}:{body.parent_id.strip()}:{body.message_id}"
         note = body.summary.strip()
         note += (
             f"\n\n[category={body.category} severity={body.severity}"
@@ -764,6 +772,7 @@ def create_app(
                 "source": source,
                 "thread": thread_key,
                 "message": body.message_id,
+                "parent": body.parent_id,
                 "requester": body.requester,
                 "category": body.category,
                 "severity": body.severity,

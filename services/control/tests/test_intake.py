@@ -122,6 +122,64 @@ def test_comment_after_done_creates_new_ticket(tmp_path):
     conn.close()
 
 
+def test_ccomment_creates_then_merges(tmp_path):
+    client, conn = make_client(tmp_path)
+    with client:
+        first = client.post(
+            "/internal/intake",
+            json={
+                "source": "forum_ccomment",
+                "thread_id": "42",
+                "parent_id": "7",
+                "message_id": "9",
+                "requester": "forum:278",
+                "title": "楼中楼补充",
+                "summary": "还是报错",
+            },
+            headers={"X-Skein-Token": TOKEN},
+        )
+        second = client.post(
+            "/internal/intake",
+            json={
+                "source": "forum_ccomment",
+                "thread_id": "42",
+                "parent_id": "7",
+                "message_id": "10",
+                "requester": "forum:278",
+                "title": "再补充",
+                "summary": "仍然不行",
+            },
+            headers={"X-Skein-Token": TOKEN},
+        )
+    assert first.status_code == 200
+    assert first.json()["created"] is True
+    row = conn.execute("SELECT origin, origin_id FROM tickets").fetchone()
+    assert row["origin"] == "forum_ccomment"
+    assert row["origin_id"] == "42:7:9"
+    assert second.json()["created"] is False
+    assert second.json()["followup"] is True
+    assert second.json()["ticket_id"] == first.json()["ticket_id"]
+    assert conn.execute("SELECT count(*) FROM tickets").fetchone()[0] == 1
+    conn.close()
+
+
+def test_ccomment_requires_parent(tmp_path):
+    client, conn = make_client(tmp_path)
+    with client:
+        response = client.post(
+            "/internal/intake",
+            json={
+                "source": "forum_ccomment",
+                "thread_id": "42",
+                "message_id": "9",
+                "title": "楼中楼补充",
+            },
+            headers={"X-Skein-Token": TOKEN},
+        )
+    assert response.status_code == 400
+    conn.close()
+
+
 def test_review_moves_public_status(tmp_path):
     client, conn = make_client(tmp_path)
     with client:
