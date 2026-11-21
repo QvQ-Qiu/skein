@@ -52,14 +52,17 @@ SQLite `llm_calls`（schema v8）：
 
 ### 5.1 模型池（2026-11-21）
 
-- qdockd 关闭后，chat/ops 主模型改直连 `https://api.ssemarket.cn/v1` + `qwen-3.8-flash`
-  （`LLM_API_KEY_1`）；不再走 `10.43.196.33:7700/v1/llm`。
+- 小秋 chat/ops：主 `https://api.ssemarket.cn/v1` + `qwen-3.8-flash`（`LLM_API_KEY_1`），
+  备 `https://api.deepseek.com/v1` + `deepseek-v4-flash-vision-exp`（`DEEPSEEK_API_KEY`）。
+  qwen 网关 404 时模型池自动回落 DeepSeek，实测 200。
+- 控制台 Agent：控制面自己的 `SKEIN_LLM_BASE` / `SKEIN_LLM_KEY` 指向 DeepSeek，
+  `SKEIN_AGENT_MODEL=deepseek-v4-flash-vision-exp`；规划一次 + 总结一次。
 - 生产 settings 从容器里取出，只替换 `llm` / `ops_llm` 段，存
   `/etc/skein/xiaoqiu-chat-settings.yaml` 与 `/etc/skein/xiaoqiu-ops-settings.yaml`，
   容器以只读挂载覆盖镜像内配置。
 - 镜像：chat `xiaoqiu:1.0.95-skein-trace`，ops `xiaoqiu:1.0.100-skein-trace`。
 - Langfuse env、回调、ops 的 `langfuse_trace` 工具与 `lftrace` 模块已移除。
-- 烟测：chat 任务返回 200，留痕显示 `qwen-3.8-flash`、7738/35 tokens、28.4s。
+- 烟测：chat 任务 200（qwen 失败后 DeepSeek 接管）；Agent 规划 4 个工具并输出中文结论。
 
 ## 6. 还没做
 

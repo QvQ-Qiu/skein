@@ -35,9 +35,9 @@ SKEIN_TOKEN=<32 字节随机>
 SKEIN_HOST=172.17.0.1
 SKEIN_PORT=7800
 
-SKEIN_LLM_BASE=https://api.ssemarket.cn/v1
-SKEIN_LLM_KEY=<qwen key>
-SKEIN_AGENT_MODEL=qwen-3.8-flash
+SKEIN_LLM_BASE=https://api.deepseek.com/v1
+SKEIN_LLM_KEY=<deepseek key>
+SKEIN_AGENT_MODEL=deepseek-v4-flash-vision-exp
 
 SKEIN_FORUM_BASE=http://127.0.0.1:8080
 SKEIN_FORUM_TOKEN=<主站 INTERNAL_TOKEN>
@@ -65,6 +65,7 @@ SKEIN_TICKET_DAILY_CAP=5
 ```
 
 - `SKEIN_LLM_KEY` 为空时控制台 Agent 返回 503；Router 也不可用。
+- 小秋 chat/ops 另有自己的模型池：qwen 主 + DeepSeek 备（见 `llm-trace.md`）。
 - `SKEIN_DISPATCH=0`：事件先记账/人工建单；需要自动派单再开。
 - `SKEIN_COOKIE_DOMAIN` 只在本地 http 调试设为 `host`；生产不设。
 
