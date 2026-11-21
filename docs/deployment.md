@@ -141,6 +141,18 @@ SKEIN_COOKIE_DOMAIN=
 - unisso 503/超时不清本地会话；登录接口每 IP 每分钟 10 次。
 - 验收用 E2E 账号 `music-e2e-test@ssemarket.cn`（见 `deploy-check-sso.sh` 样板）。
 
+### 两级身份（2026-11-21）
+
+- `GET /api/session?surface=market` 与 `POST /api/session/login {"surface":"market"}`
+  允许 `internal=false`（集市用户）；控制台、`/ops/*`、`/internal/*` 仍要求 `internal=true`。
+- 控制面 → 小秋 chat 带 `X-Skein-User: v1.<base64url>.<hmac>` 短时身份头。
+  `/etc/skein/env` 的 `SKEIN_ASSERTION_KEY` 与 `/etc/skein/xiaoqiu-chat.env` 的
+  `SKEIN_USER_SECRET` 必须是同一个随机值（600，不进仓库）。
+- 小秋按 `internal` 映射：`true` → admin，`false` → user；未配置 `SKEIN_USER_SECRET`
+  时忽略身份头、回退论坛 JWT（滚动发布安全）。
+- 当前 chat 镜像 `xiaoqiu:1.0.92-skein-user`（从 `1.0.91` 增量替换
+  `app/api/deps.py`，构建件 `docker/Dockerfile.skein-user`）。
+
 对外入口（2026-11-19 已上线）：
 
 - nginx 是现有 `sse_market_server-nginx_proxy-1` 容器，主进程用 `-c /etc/nginx/custom.conf` 启动；

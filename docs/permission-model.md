@@ -58,6 +58,7 @@ X-Skein-User: <sub>|<internal>|<email>|<exp>.<HMAC>
 - chat 代理在 SSO 有效时带 `X-Skein-User: v1.<base64url>.<hmac>`；浏览器自带的同名头会被剥掉，不能伪造。
 - 小秋 `app/api/deps.py` 校验身份头：`internal=true` → `admin`，`false` → `user`；`SKEIN_USER_SECRET` 未配置时忽略头、回退 JWT。
 - 部署：`/etc/skein/env` 的 `SKEIN_ASSERTION_KEY` 与 `/etc/skein/xiaoqiu-chat.env` 的 `SKEIN_USER_SECRET` 必须是同一个随机值；先发小秋镜像，再发控制面，最后重启两边。
+- 2026-11-21 已部署：控制面 `6e584c6`、chat 镜像 `xiaoqiu:1.0.92-skein-user`；管理端 SSO 登录、`/internal/summary`、chat 代理 200，chat 容器 healthy。非 internal 的线上账号未实测，单测覆盖。
 - 测试：控制面 209 个测试、小秋身份头 5 个用例通过。
 
 ## 3. 不需要做的
