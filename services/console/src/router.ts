@@ -7,8 +7,6 @@ import SignalsView from "./views/SignalsView.vue";
 import FleetView from "./views/FleetView.vue";
 import WorkersView from "./views/WorkersView.vue";
 import NodesView from "./views/NodesView.vue";
-import HostView from "./views/HostView.vue";
-import PodsView from "./views/PodsView.vue";
 import EventsView from "./views/EventsView.vue";
 import CallsView from "./views/CallsView.vue";
 import PlatformView from "./views/PlatformView.vue";
@@ -29,8 +27,6 @@ export const router = createRouter({
     { path: "/workers/:id", component: WorkersView },
     { path: "/nodes", component: NodesView },
     { path: "/nodes/:id", component: NodesView },
-    { path: "/host", component: HostView },
-    { path: "/pods", component: PodsView },
     { path: "/events", component: EventsView },
     { path: "/calls", component: CallsView },
     { path: "/logs", component: LogsView },

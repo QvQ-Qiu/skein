@@ -41,10 +41,6 @@ class Config:
     # 给 chat 上游签用户身份头（sub/internal/email），与小秋的 SKEIN_USER_SECRET 相同
     assertion_key: str = ""
     qa_chat_upstream: str = ""
-    qa_ops_upstream: str = ""
-    ops_panel_secret: str = ""
-    ops_panel_sub: str = "7cbb5d2c-ad9f-4184-b80b-7e7421642d3f"
-    ops_panel_email: str = "skein@ssemarket.cn"
 
     @classmethod
     def from_env(cls, env: dict[str, str] | None = None) -> Config:
@@ -103,10 +99,6 @@ class Config:
             ),
             assertion_key=source.get("SKEIN_ASSERTION_KEY", base.assertion_key),
             qa_chat_upstream=source.get("SKEIN_QA_CHAT_UPSTREAM", base.qa_chat_upstream),
-            qa_ops_upstream=source.get("SKEIN_QA_OPS_UPSTREAM", base.qa_ops_upstream),
-            ops_panel_secret=source.get("SKEIN_OPS_PANEL_SECRET", base.ops_panel_secret),
-            ops_panel_sub=source.get("SKEIN_OPS_PANEL_SUB", base.ops_panel_sub),
-            ops_panel_email=source.get("SKEIN_OPS_PANEL_EMAIL", base.ops_panel_email),
         )
 
     @staticmethod

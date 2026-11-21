@@ -130,11 +130,7 @@ def create_app(
     sso_config: SsoConfig | None = None,
     sso_client: Any | None = None,
     qa_chat_upstream: str = "",
-    qa_ops_upstream: str = "",
     qa_client: Any | None = None,
-    qa_panel_secret: str = "",
-    qa_panel_sub: str = "",
-    qa_panel_email: str = "skein@ssemarket.cn",
     qa_user_secret: str = "",
     llm_base: str = "",
     llm_key: str = "",
@@ -153,14 +149,7 @@ def create_app(
         if sso_client is None:
             sso_client = SsoClient(sso_config)
         sso_auth = SsoAuth(sso_client, sso_config)
-    qa = QAProxy(
-        qa_chat_upstream,
-        qa_ops_upstream,
-        qa_client,
-        panel_secret=qa_panel_secret,
-        panel_sub=qa_panel_sub,
-        panel_email=qa_panel_email,
-    )
+    qa = QAProxy(qa_chat_upstream, qa_client)
     login_attempts: dict[str, deque[float]] = defaultdict(deque)
     user_secret = qa_user_secret
 
@@ -354,25 +343,6 @@ def create_app(
             response.delete_cookie(key=name, domain=domain, path="/")
         return response
 
-    async def internal_only(
-        request: Request, x_skein_token: str = Header(default="")
-    ) -> None:
-        # ops 面只放内部身份：服务令牌，或 SSO 会话且 internal=1。
-        if token and x_skein_token == token:
-            return
-        if sso_auth is None:
-            raise HTTPException(status_code=401, detail="unauthorized")
-        try:
-            principal = await asyncio.to_thread(
-                sso_auth.verify, request.cookies, "admin"
-            )
-        except SsoRejected as error:
-            raise HTTPException(status_code=error.status, detail=error.code)
-        except SsoUnavailable:
-            raise HTTPException(status_code=503, detail="sso_unavailable")
-        if not principal.internal:
-            raise HTTPException(status_code=403, detail="not_internal")
-
     async def chat_principal(request: Request) -> Principal | None:
         if sso_auth is None:
             return None
@@ -466,14 +436,6 @@ def create_app(
             f"task/{path}",
             await chat_identity_headers(request),
         )
-
-    @app.api_route("/ops/{path:path}", methods=QA_METHODS)
-    async def qa_ops(path: str, request: Request) -> StreamingResponse:
-        """小秋 ops 面：只有内部身份能到；公网用户拿不到这条路径。"""
-        await internal_only(request, request.headers.get("x-skein-token", ""))
-        if not qa.enabled_ops:
-            raise HTTPException(status_code=503, detail="qa_not_configured")
-        return await qa.forward(request, qa.ops_upstream, f"ops/{path}")
 
     @app.get("/internal/summary", dependencies=[Depends(auth)])
     def internal_summary() -> dict:

@@ -1,11 +1,9 @@
-"""把 xiaoqiu 的两面挂到控制面后面：统一入口 + 权限隔离。
+"""把 xiaoqiu chat 挂到控制面后面：统一入口 + 身份签名。
 
 - `/api/v1/agent/*`、`/task/*` → chat 上游：论坛用户 JWT 原样透传，
   用户级鉴权仍由上游负责；Cookie 不转发，避免把 SSO 会话带给上游。
-- `/ops/*` → ops 上游：只允许内部主体（服务令牌，或 SSO 会话且 internal=1），
-  由 api.py 的 internal_only 依赖把关。
 
-上游地址为空时对应路由返回 503，控制面等同没启用这层代理。
+上游地址为空时对应路由返回 503。
 """
 
 from __future__ import annotations
@@ -89,19 +87,9 @@ class QAProxy:
     def __init__(
         self,
         chat_upstream: str = "",
-        ops_upstream: str = "",
         client: httpx.AsyncClient | None = None,
-        panel_secret: str = "",
-        panel_sub: str = "",
-        panel_email: str = "skein@ssemarket.cn",
-        panel_ttl: int = 3600,
     ) -> None:
         self.chat_upstream = chat_upstream.rstrip("/")
-        self.ops_upstream = ops_upstream.rstrip("/")
-        self._panel_secret = panel_secret
-        self._panel_sub = panel_sub
-        self._panel_email = panel_email
-        self._panel_ttl = panel_ttl
         self._client = client or httpx.AsyncClient(
             timeout=httpx.Timeout(connect=5.0, read=None, write=30.0, pool=5.0),
             follow_redirects=False,
@@ -112,21 +100,6 @@ class QAProxy:
     @property
     def enabled_chat(self) -> bool:
         return bool(self.chat_upstream)
-
-    @property
-    def enabled_ops(self) -> bool:
-        return bool(self.ops_upstream)
-
-    def _panel_cookie(self) -> str:
-        """给 ops 上游签一个面板会话：ops_session=sub|uid|email|exp.HMAC。"""
-        if not (self._panel_secret and self._panel_sub):
-            return ""
-        exp = int(time.time()) + self._panel_ttl
-        payload = f"{self._panel_sub}||{self._panel_email}|{exp}"
-        sig = hmac.new(
-            self._panel_secret.encode(), payload.encode(), hashlib.sha256
-        ).hexdigest()
-        return f"ops_session={payload}|{sig}"
 
     async def forward(
         self,
@@ -143,10 +116,6 @@ class QAProxy:
             for key, value in request.headers.items()
             if key.lower() not in STRIP_HEADERS and key.lower() != "cookie"
         }
-        if upstream == self.ops_upstream:
-            panel = self._panel_cookie()
-            if panel:
-                headers["cookie"] = panel
         if extra_headers:
             headers.update(extra_headers)
         body = await request.body()

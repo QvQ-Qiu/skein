@@ -77,11 +77,7 @@ def make_app(tmp_path, sso=False, internal=True, admin=True, user_secret=""):
         str(tmp_path / "blobs"),
         TOKEN,
         qa_chat_upstream="http://chat.test",
-        qa_ops_upstream="http://ops.test",
         qa_client=client,
-        qa_panel_secret="panel-secret-123456",
-        qa_panel_sub="sub-1",
-        qa_panel_email="ops@example.com",
         qa_user_secret=user_secret,
         **kwargs,
     )
@@ -183,50 +179,10 @@ def test_chat_forwards_method_body_and_query(tmp_path):
     conn.close()
 
 
-def test_ops_requires_token_or_internal(tmp_path):
-    app, conn, upstream = make_app(tmp_path)
-    with TestClient(app) as client:
-        assert client.get("/ops/metrics").status_code == 401
-        ok = client.get("/ops/metrics", headers={"X-Skein-Token": TOKEN})
-    assert ok.status_code == 200
-    sent = upstream.requests[-1]
-    assert sent["url"] == "http://ops.test/ops/metrics"
-    assert sent["headers"]["cookie"].startswith("ops_session=sub-1||ops@example.com|")
-    conn.close()
-
-
-def test_ops_rejects_public_sso_user(tmp_path):
-    app, conn, _ = make_app(tmp_path, sso=True, internal=False, admin=False)
-    with TestClient(app) as client:
-        response = client.get("/ops/metrics", headers={"Cookie": "unisso_sid=sess-ok"})
-    assert response.status_code == 403
-    assert response.json()["detail"] == "not_internal"
-    conn.close()
-
-
-def test_ops_rejects_market_user(tmp_path):
-    app, conn, _ = make_app(tmp_path, sso=True, internal=True, admin=False)
-    with TestClient(app) as client:
-        response = client.get("/ops/metrics", headers={"Cookie": "unisso_sid=sess-ok"})
-    assert response.status_code == 403
-    assert response.json()["detail"] == "not_admin"
-    conn.close()
-
-
-def test_ops_accepts_internal_sso_user(tmp_path):
-    app, conn, upstream = make_app(tmp_path, sso=True, internal=True)
-    with TestClient(app) as client:
-        response = client.get("/ops/metrics", headers={"Cookie": "unisso_sid=sess-ok"})
-    assert response.status_code == 200
-    assert upstream.requests[-1]["url"] == "http://ops.test/ops/metrics"
-    conn.close()
-
-
 def test_disabled_upstream_returns_503(tmp_path):
     conn = db.connect(tmp_path / "none.db")
     db.migrate(conn)
     app = create_app(conn, str(tmp_path / "b"), TOKEN)
     with TestClient(app) as client:
         assert client.get("/api/v1/agent/x").status_code == 503
-        assert client.get("/ops/x", headers={"X-Skein-Token": TOKEN}).status_code == 503
     conn.close()

@@ -48,9 +48,8 @@ make run-control # 控制面（HTTP）
 | `SKEIN_PLATFORM_REPOS` | 空 | 平台 → 仓库路径 JSON |
 | `SKEIN_WATCHDOG*` | 关 | 信号、自动建单、每日巡检 |
 | `SKEIN_SSO_*` | 空 | UniSSO 内接 |
-| `SKEIN_QA_CHAT_UPSTREAM` / `SKEIN_QA_OPS_UPSTREAM` | 空 | 小秋 chat/ops 上游 |
+| `SKEIN_QA_CHAT_UPSTREAM` | 空 | 小秋 chat 上游 |
 | `SKEIN_ASSERTION_KEY` | 空 | chat 身份头签名，与小秋 `SKEIN_USER_SECRET` 相同 |
-| `SKEIN_OPS_PANEL_SECRET` | 空 | 给 ops 上游代签面板会话 |
 
 ## 四、接口
 
@@ -62,7 +61,6 @@ make run-control # 控制面（HTTP）
 | POST | `/api/session/login` | 无 | 邮箱+密码 → UniSSO → Cookie |
 | POST | `/api/session/logout` | 无 | 单点登出 + 双清 Cookie |
 | GET/POST | `/api/v1/agent/*`、`/task/*` | chat 上游 | 小秋 chat 代理 |
-| GET/POST | `/ops/*` | 管理员 | 小秋 ops 感知代理 |
 | GET | `/internal/summary` | 令牌/管理员 | 计数概览 |
 | GET | `/internal/stream` | 令牌/管理员 | SSE 快照 |
 | POST | `/internal/tickets` | 令牌 | 外部建单（Watchdog/脚本） |
