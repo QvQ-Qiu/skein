@@ -1,4 +1,3 @@
-import json
 
 import pytest
 from fastapi import FastAPI, Header, HTTPException
@@ -129,8 +128,6 @@ def test_missing_token_is_unauthorized(client):
         "/internal/sessions",
         "/internal/sessions/s1/turns",
         "/internal/topology",
-        "/internal/audit",
-        "/internal/admission",
     )
     for path in paths:
         assert client.get(path).status_code == 401
@@ -327,129 +324,4 @@ def test_topology_windows(client):
     assert body["dispatches"][0]["id"] == "bulk-d509"
     assert len(body["sessions"]) == 500
     assert "s1" not in {item["id"] for item in body["sessions"]}
-
-
-def test_audit_parses_detail(client):
-    body = client.get("/internal/audit", headers=headers()).json()
-    assert body["audit"] == [
-        {
-            "id": 1,
-            "actor": "human",
-            "action": "review",
-            "detail": {"ticket_id": "tk1"},
-            "created_at": 1700,
-        }
-    ]
-
-
-def _policy(**overrides):
-    body = {
-        "accept": True,
-        "require_mention": True,
-        "record_unmentioned": True,
-        "min_text_chars": 2,
-    }
-    body.update(overrides)
-    return body
-
-
-def test_admission_get_is_default_without_row(client):
-    assert client.put("/internal/admission", json={}).status_code == 401
-    body = client.get("/internal/admission", headers=headers()).json()
-    assert body == {"default": _policy(), "sources": {}}
-
-
-def test_admission_put_saves_audits_and_round_trips(client):
-    payload = {
-        "default": _policy(),
-        "sources": {
-            "forum_post": _policy(require_mention=False),
-            "forum_comment": _policy(),
-            "a:b_c-d": _policy(min_text_chars=0),
-            "x" * 64: _policy(min_text_chars=200),
-        },
-    }
-    saved = client.put("/internal/admission", json=payload, headers=headers())
-    assert saved.status_code == 200
-    assert saved.json() == payload
-    assert client.get("/internal/admission", headers=headers()).json() == payload
-
-    row = client.conn.execute(
-        "SELECT actor, action, detail FROM audit WHERE action = 'admission.update'"
-    ).fetchone()
-    assert row["actor"] == "human"
-    assert row["action"] == "admission.update"
-    detail = json.loads(row["detail"])
-    assert detail["before"] == {"default": _policy(), "sources": {}}
-    assert detail["after"] == payload
-
-
-def test_admission_put_fills_missing_fields(client):
-    saved = client.put(
-        "/internal/admission",
-        json={"default": {"accept": False}, "sources": {"forum_post": {"require_mention": False}}},
-        headers=headers(),
-    )
-    assert saved.status_code == 200
-    assert saved.json() == {
-        "default": _policy(accept=False),
-        "sources": {"forum_post": _policy(require_mention=False)},
-    }
-
-
-def test_admission_put_rejects_invalid_and_keeps_stored(client):
-    ok = {"default": _policy(accept=False), "sources": {}}
-    assert client.put("/internal/admission", json=ok, headers=headers()).status_code == 200
-    cases = [
-        {"default": _policy(), "sources": {}, "extra": 1},
-        {"sources": {}},
-        {"default": {"accept": "yes"}, "sources": {}},
-        {"default": {"accept": 1}, "sources": {}},
-        {"default": {"min_text_chars": 201}, "sources": {}},
-        {"default": {"min_text_chars": -1}, "sources": {}},
-        {"default": {"min_text_chars": True}, "sources": {}},
-        {"default": {"min_text_chars": 1.5}, "sources": {}},
-        {"default": _policy(), "sources": {"Forum": _policy()}},
-        {"default": _policy(), "sources": {"": _policy()}},
-        {"default": _policy(), "sources": {"a" * 65: _policy()}},
-        {"default": _policy(), "sources": {"forum.post": _policy()}},
-        {"default": _policy(), "sources": []},
-        {"default": [], "sources": {}},
-        {"default": {"note": 1}, "sources": {}},
-        {"default": _policy(), "sources": {"forum_post": {"accept": False, "note": 1}}},
-    ]
-    for body in cases:
-        response = client.put("/internal/admission", json=body, headers=headers())
-        assert response.status_code == 400, body
-    assert client.get("/internal/admission", headers=headers()).json() == ok
-    count = client.conn.execute(
-        "SELECT COUNT(*) AS n FROM audit WHERE action = 'admission.update'"
-    ).fetchone()
-    assert count["n"] == 1
-
-
-def test_admission_get_ignores_bad_json(client):
-    client.conn.execute(
-        "INSERT INTO kv (key, value) VALUES (?, ?)",
-        ("admission:policies", "{"),
-    )
-    body = client.get("/internal/admission", headers=headers()).json()
-    assert body == {"default": _policy(), "sources": {}}
-
-
-def test_logs_ring(client):
-    import logging
-
-    from skein import logbuf
-
-    logbuf.install()
-    logging.getLogger("skein.test.logs").info("hello %s", "logs")
-    body = client.get(
-        "/internal/logs",
-        params={"component": "skein.test.logs"},
-        headers=headers(),
-    ).json()
-    assert any(item["message"] == "hello logs" for item in body["logs"])
-    assert all(item["component"] == "skein.test.logs" for item in body["logs"])
-
 

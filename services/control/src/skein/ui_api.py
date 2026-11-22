@@ -17,8 +17,7 @@ from pathlib import Path
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
 
-from skein import logbuf, watchdog
-from skein.admission import load_policies, save_policies
+from skein import watchdog
 from skein.session_store import blob_path
 from skein.summary import summary as build_summary
 
@@ -75,7 +74,6 @@ _TURN_FIELDS = (
     "created_at",
 )
 _NODE_FIELDS = ("id", "name", "host", "platforms", "status", "max_workers", "last_seen")
-_AUDIT_FIELDS = ("id", "actor", "action", "detail", "created_at")
 
 _JSON_PAYLOAD = frozenset({"payload"})
 _JSON_DETAIL = frozenset({"detail"})
@@ -505,37 +503,5 @@ def create_ui_router(
                 "X-Accel-Buffering": "no",
             },
         )
-
-    @router.get("/internal/audit")
-    def list_audit(limit: int = 100) -> dict:
-        return {
-            "audit": _rows(
-                conn,
-                "SELECT id, actor, action, detail, created_at FROM audit"
-                " ORDER BY created_at DESC, id DESC LIMIT ?",
-                (_nonneg(limit),),
-                _AUDIT_FIELDS,
-                _JSON_DETAIL,
-            )
-        }
-
-    @router.get("/internal/logs")
-    def list_logs(limit: int = 300, component: str = "", level: str = "") -> dict:
-        return {
-            "logs": logbuf.recent(
-                limit=limit, component=component or None, level=level or None
-            )
-        }
-
-    @router.get("/internal/admission")
-    def get_admission() -> dict:
-        return load_policies(conn)
-
-    @router.put("/internal/admission")
-    def put_admission(body: dict) -> dict:
-        try:
-            return save_policies(conn, body)
-        except (ValueError, TypeError) as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     return router

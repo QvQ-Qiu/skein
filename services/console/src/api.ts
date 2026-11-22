@@ -100,22 +100,6 @@ export interface NodeRecord {
   last_seen: number;
 }
 
-export interface RunRecord {
-  id: string;
-  job: string;
-  day: string;
-  status: string;
-  detail: string | null;
-}
-
-export interface PromptPointer {
-  part: string;
-  stable_revision: number;
-  canary_revision: number | null;
-  frozen_until: number | null;
-  editable: boolean;
-}
-
 export interface Summary {
   events: { total: number; by_verdict: Record<string, number> };
   threads: number;
@@ -167,33 +151,6 @@ export interface ThreadDetailResponse {
   tickets: Ticket[];
 }
 
-export interface AuditRecord {
-  id: number;
-  actor: string;
-  action: string;
-  detail: unknown;
-  created_at: number;
-}
-
-export interface SourcePolicy {
-  accept: boolean;
-  require_mention: boolean;
-  record_unmentioned: boolean;
-  min_text_chars: number;
-}
-
-export interface AdmissionPolicies {
-  default: SourcePolicy;
-  sources: Record<string, SourcePolicy>;
-}
-
-export interface LogRecord {
-  at: number;
-  level: string;
-  component: string;
-  message: string;
-}
-
 export interface Topology {
   nodes: NodeRecord[];
   tickets: Ticket[];
@@ -211,14 +168,6 @@ export interface SignalList {
 
 export interface NodeList {
   nodes: NodeRecord[];
-}
-
-export interface RunList {
-  runs: RunRecord[];
-}
-
-export interface PromptList {
-  prompts: PromptPointer[];
 }
 
 export interface EventList {
@@ -296,15 +245,6 @@ export function fetchNodes(): Promise<NodeList> {
   return request<NodeList>("/internal/nodes");
 }
 
-export function fetchRuns(limit = 20): Promise<RunList> {
-  const query = new URLSearchParams({ limit: String(limit) });
-  return request<RunList>(withQuery("/internal/runs", query));
-}
-
-export function fetchPrompts(): Promise<PromptList> {
-  return request<PromptList>("/internal/prompts");
-}
-
 export function fetchEvents(params?: {
   since?: number;
   limit?: number;
@@ -344,34 +284,6 @@ export function fetchSessionTurns(
 
 export function fetchThread(id: string): Promise<ThreadDetailResponse> {
   return request<ThreadDetailResponse>(`/internal/threads/${encodeURIComponent(id)}`);
-}
-
-export function fetchAdmission(): Promise<AdmissionPolicies> {
-  return request<AdmissionPolicies>("/internal/admission");
-}
-
-export function saveAdmission(body: AdmissionPolicies): Promise<AdmissionPolicies> {
-  return request<AdmissionPolicies>("/internal/admission", {
-    method: "PUT",
-    body: JSON.stringify(body),
-  });
-}
-
-export function fetchAudit(limit = 100): Promise<{ audit: AuditRecord[] }> {
-  const query = new URLSearchParams({ limit: String(limit) });
-  return request<{ audit: AuditRecord[] }>(withQuery("/internal/audit", query));
-}
-
-export function fetchLogs(params?: {
-  limit?: number;
-  component?: string;
-  level?: string;
-}): Promise<{ logs: LogRecord[] }> {
-  const query = new URLSearchParams();
-  if (params?.limit != null) query.set("limit", String(params.limit));
-  if (params?.component) query.set("component", params.component);
-  if (params?.level) query.set("level", params.level);
-  return request<{ logs: LogRecord[] }>(withQuery("/internal/logs", query));
 }
 
 export function fetchTopology(): Promise<Topology> {

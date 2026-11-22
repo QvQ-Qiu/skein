@@ -158,7 +158,6 @@ const navItems = [
   { label: "Agent", key: "/agent" },
   { label: "需求", key: "/tickets" },
   { label: "运行", key: "/fleet" },
-  { label: "平台", key: "/platform" },
 ] as const;
 
 const RUNS_NAV = [
@@ -168,11 +167,6 @@ const RUNS_NAV = [
   { label: "事件", key: "/events" },
   { label: "会话", key: "/calls" },
   { label: "信号", key: "/signals" },
-] as const;
-
-const PLATFORM_NAV = [
-  { label: "准入与提示词", key: "/platform" },
-  { label: "日志", key: "/logs" },
 ] as const;
 
 const booting = computed(() => !store.booted);
@@ -275,7 +269,7 @@ function applyToken() {
   void store.refresh();
 }
 
-const section = computed<"runs" | "platform" | null>(() => {
+const section = computed<"runs" | null>(() => {
   if (
     ["/fleet", "/nodes", "/workers", "/events", "/calls", "/signals"].includes(
       route.path,
@@ -283,19 +277,16 @@ const section = computed<"runs" | "platform" | null>(() => {
   ) {
     return "runs";
   }
-  if (["/platform", "/logs"].includes(route.path)) return "platform";
   return null;
 });
 
 const subItems = computed(() => {
   if (section.value === "runs") return RUNS_NAV;
-  if (section.value === "platform") return PLATFORM_NAV;
   return [];
 });
 
 function navActive(key: string) {
   if (key === "/fleet") return section.value === "runs";
-  if (key === "/platform") return section.value === "platform";
   return route.path === key || route.path.startsWith(`${key}/`);
 }
 

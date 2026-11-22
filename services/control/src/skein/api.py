@@ -22,7 +22,7 @@ from fastapi.responses import JSONResponse, RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from skein import db, llm_trace, prompts, runs, store, watchdog
+from skein import db, llm_trace, store, watchdog
 from skein.admission import Event, decide, policy_for
 from skein.agent import Agent
 from skein.channel import ChannelHub
@@ -57,18 +57,6 @@ class TurnIn(BaseModel):
 
 class ReviewIn(BaseModel):
     decision: str
-
-
-class PromptProposeIn(BaseModel):
-    part: str
-    text: str
-    base_revision: int
-    source: str = "watchdog"
-    signal_id: str | None = None
-
-
-class PromptActionIn(BaseModel):
-    part: str
 
 
 class LoginIn(BaseModel):
@@ -491,19 +479,6 @@ def create_app(
         ).fetchall()
         return {"thread_id": key, "actor": principal.sub, "messages": [dict(row) for row in rows]}
 
-    @app.get("/internal/runs", dependencies=[Depends(auth)])
-    def list_runs(limit: int = 20) -> dict:
-        return {
-            "runs": [
-                {"id": r.id, "job": r.job, "day": r.day, "status": r.status, "detail": r.detail}
-                for r in runs.recent(conn, limit)
-            ]
-        }
-
-    @app.get("/internal/prompts", dependencies=[Depends(auth)])
-    def list_prompts() -> dict:
-        return {"prompts": [prompts.state(conn, part) for part in prompts.EDITABLE_PARTS]}
-
     @app.get("/internal/signals", dependencies=[Depends(auth)])
     def list_signals() -> dict:
         return {"signals": watchdog.signals(conn)}
@@ -656,38 +631,6 @@ def create_app(
                 for r in rows
             ]
         }
-
-    @app.post("/internal/prompts/propose", dependencies=[Depends(auth)])
-    def propose_prompt(body: PromptProposeIn) -> dict:
-        try:
-            revision = prompts.propose(
-                conn, body.part, body.text, body.base_revision, body.source, body.signal_id
-            )
-        except prompts.PromptFrozen as exc:
-            raise HTTPException(status_code=423, detail=str(exc))
-        except prompts.PromptConflict as exc:
-            raise HTTPException(status_code=409, detail=str(exc))
-        except prompts.PromptError as exc:
-            raise HTTPException(status_code=400, detail=str(exc))
-        return {"revision": revision, "part": body.part}
-
-    @app.post("/internal/prompts/promote", dependencies=[Depends(auth)])
-    def promote_prompt(body: PromptActionIn) -> dict:
-        try:
-            revision = prompts.promote(conn, body.part)
-        except prompts.PromptError as exc:
-            raise HTTPException(status_code=400, detail=str(exc))
-        return {"revision": revision, "part": body.part}
-
-    @app.post("/internal/prompts/rollback", dependencies=[Depends(auth)])
-    def rollback_prompt(body: PromptActionIn) -> dict:
-        prompts.rollback(conn, body.part)
-        return prompts.state(conn, body.part)
-
-    @app.post("/internal/prompts/unfreeze", dependencies=[Depends(auth)])
-    def unfreeze_prompt(body: PromptActionIn) -> dict:
-        prompts.unfreeze(conn, body.part)
-        return prompts.state(conn, body.part)
 
     @app.post("/internal/tickets/{ticket_id}/cancel", dependencies=[Depends(auth)])
     async def cancel_ticket(ticket_id: str) -> dict:

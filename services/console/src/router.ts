@@ -9,8 +9,6 @@ import WorkersView from "./views/WorkersView.vue";
 import NodesView from "./views/NodesView.vue";
 import EventsView from "./views/EventsView.vue";
 import CallsView from "./views/CallsView.vue";
-import PlatformView from "./views/PlatformView.vue";
-import LogsView from "./views/LogsView.vue";
 
 export const router = createRouter({
   history: createWebHashHistory(import.meta.env.BASE_URL),
@@ -29,7 +27,5 @@ export const router = createRouter({
     { path: "/nodes/:id", component: NodesView },
     { path: "/events", component: EventsView },
     { path: "/calls", component: CallsView },
-    { path: "/logs", component: LogsView },
-    { path: "/platform", component: PlatformView },
   ],
 });
