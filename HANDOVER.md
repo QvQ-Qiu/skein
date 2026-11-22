@@ -105,6 +105,31 @@ docker build -f docker/Dockerfile.skein-frontdesk -t xiaoqiu:<tag> .
 源码改完必须 `go build` + 替换容器 `/app/serve` + `docker restart server`；生产二进制是热替换，
 重建镜像前先留 `/root/serve.bak-*`。
 
+### 发布工作流（worker→PR→测试→人工→正式）
+
+闭环：worker 推分支 → 控制面自动建 **draft PR 到 develop**（仓库无 develop 时回落仓库默认分支）
+→ develop 上的 webhook 自动部署测试环境 → 人工在控制台验收 → PR develop→main 人工审批 → 正式。
+
+- PR 基准分支解析顺序（`forge.PullRequestService.base_for`）：仓库级 `base` 配置 →
+  `SKEIN_GITHUB_BASE`（未设=自动）→ 自动：仓库有 `develop` 分支用 develop，否则仓库默认分支。
+  自动结果按仓库缓存 10 分钟。
+- `SKEIN_GITHUB_REPOS`（JSON）值两种写法都认：`{"平台": "owner/repo"}` 或
+  `{"平台": {"slug": "owner/repo", "base": "develop"}}`；`base` 非空则跳过自动探测。
+- `SKEIN_TEST_ENVS`（JSON）：`{"owner/repo": "https://测试环境地址"}`。控制面启动时换算成
+  平台键随工单详情下发，交付卡片出「测试环境 ↗」链接；dispatches 表新增 `pr_base` 列
+  （schema v12，启动自动补列），交付卡片同时显示 PR 目标分支。
+- dispatches 的 `platform` 列随详情一并下发（之前控制台拿不到）。
+
+### GitHub 令牌（fine-grained PAT）申请口径
+
+- 用 **fine-grained personal access token**，Resource owner 选 `SysuMirror`；
+  Repository access 选 **Only select repositories**，只勾实际会收 PR 的业务仓库
+  （按 `SKEIN_GITHUB_REPOS` 里配的 slug 来，起步最少只勾一个，之后逐个补）。
+- Permissions 只给两项：**Contents: Read-only** + **Pull requests: Read and write**。
+  其它一律不给（无 admin、无 workflow、无 secrets）。
+- Expiration 建议 90 天，记到期换新。
+- token 只放 A 机 `/etc/skein/env`（600）的 `SKEIN_GITHUB_TOKEN`，**不进仓库、不进聊天、不进笔记**。
+
 ## 7. 自检
 
 ```bash
