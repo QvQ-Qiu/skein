@@ -5,7 +5,9 @@ from skein.forge import (
     GitHubClient,
     PullRequest,
     PullRequestService,
+    RepoTarget,
     github_repo_from_remote,
+    normalize_repos,
 )
 
 
@@ -103,8 +105,94 @@ def test_service_uses_platform_mapping_and_builds_body() -> None:
     )
 
     assert pr is not None
+    assert pr.base == "main"
     _, payload = calls[0]
     assert payload["head"] == "fix/yz-sk-9"
+    assert payload["base"] == "main"
     assert payload["title"] == "SK-9: 修登录"
     assert "点登录没反应" in payload["body"]
     assert "不会自动合入" in payload["body"]
+
+
+def test_normalize_repos_accepts_both_forms() -> None:
+    assert normalize_repos({"a": "o/r"}) == {"a": RepoTarget(slug="o/r")}
+    assert normalize_repos({"b": {"slug": "o/r2", "base": "develop"}}) == {
+        "b": RepoTarget(slug="o/r2", base="develop")
+    }
+    assert normalize_repos({"d": RepoTarget(slug="o/r3", base="main")}) == {
+        "d": RepoTarget(slug="o/r3", base="main")
+    }
+    assert normalize_repos({"c": 42}) == {}  # 非法值直接丢弃
+    assert normalize_repos(None) == {}
+
+
+def test_repo_info_and_has_branch() -> None:
+    def http(method, url, payload):
+        if url.endswith("/repos/o/r"):
+            return 200, {"default_branch": "prod"}
+        if url.endswith("/repos/o/r/branches/develop"):
+            return 404, {"message": "Not Found"}
+        return 500, {}
+
+    client = GitHubClient("tok", http=http)
+    assert client.repo_info("o/r") == {"default_branch": "prod"}
+    assert client.has_branch("o/r", "develop") is False
+
+
+def test_base_auto_uses_develop_then_default_branch() -> None:
+    def http(method, url, payload):
+        if url.endswith("/repos/o/r"):
+            return 200, {"default_branch": "prod"}
+        if url.endswith("/repos/o/r/branches/develop"):
+            return 200, {"name": "develop"}
+        return 500, {}
+
+    service = PullRequestService(GitHubClient("tok", http=http))
+    assert service.base_for("", "o/r") == "develop"
+
+    def http_no_develop(method, url, payload):
+        if url.endswith("/repos/o/r"):
+            return 200, {"default_branch": "prod"}
+        if url.endswith("/repos/o/r/branches/develop"):
+            return 404, {}
+        return 500, {}
+
+    service = PullRequestService(GitHubClient("tok", http=http_no_develop))
+    assert service.base_for("", "o/r") == "prod"
+
+
+def test_base_priority_repo_then_global_then_auto() -> None:
+    calls = []
+
+    def http(method, url, payload):
+        calls.append(url)
+        if url.endswith("/repos/o/r"):
+            return 200, {"default_branch": "prod"}
+        if url.endswith("/repos/o/r/branches/develop"):
+            return 200, {}
+        return 500, {}
+
+    client = GitHubClient("tok", http=http)
+    per_repo = PullRequestService(
+        client, repos={"market": RepoTarget(slug="o/r", base="staging")}
+    )
+    assert per_repo.base_for("market", "o/r") == "staging"
+    # base 显式配置时不应发起任何探测请求
+    assert calls == []
+
+    global_base = PullRequestService(client, base="release")
+    assert global_base.base_for("", "o/r") == "release"
+
+    auto = PullRequestService(client)
+    assert auto.base_for("market", "o/r") == "develop"
+    assert auto.base_for("", "o/r") == "develop"  # 命中缓存，不再探测
+
+
+def test_auto_base_falls_back_to_default_when_branch_probe_fails() -> None:
+    def http(method, url, payload):
+        if url.endswith("/repos/o/r"):
+            return 200, {"default_branch": "prod"}
+        raise ForgeError("network down")
+
+    service = PullRequestService(GitHubClient("tok", http=http))
+    assert service.base_for("", "o/r") == "prod"

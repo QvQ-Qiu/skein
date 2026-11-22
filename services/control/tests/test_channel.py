@@ -18,7 +18,7 @@ class FakePR:
         self.calls.append((ticket, result))
         if not result.get("pushed") or not result.get("branch"):
             return None
-        return PullRequest(number=1, url="https://github.com/o/r/pull/1")
+        return PullRequest(number=1, url="https://github.com/o/r/pull/1", base="develop")
 
 
 @pytest.fixture()
@@ -162,6 +162,8 @@ def test_result_creates_pr_and_records_url(app_client):
     assert app_client.pr.calls[0][0]["code"] == ticket
     pr_url = app_client.conn.execute("SELECT pr_url FROM dispatches").fetchone()[0]
     assert pr_url == "https://github.com/o/r/pull/1"
+    pr_base = app_client.conn.execute("SELECT pr_base FROM dispatches").fetchone()[0]
+    assert pr_base == "develop"
     platform = app_client.conn.execute("SELECT platform FROM dispatches").fetchone()[0]
     assert platform == "forum"
     action = app_client.conn.execute(

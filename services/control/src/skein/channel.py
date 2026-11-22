@@ -208,8 +208,8 @@ class ChannelHub:
         if pr is None:
             return
         self._conn.execute(
-            "UPDATE dispatches SET pr_url = ?, updated_at = ? WHERE id = ?",
-            (pr.url, time.time(), dispatch_id),
+            "UPDATE dispatches SET pr_url = ?, pr_base = ?, updated_at = ? WHERE id = ?",
+            (pr.url, pr.base, time.time(), dispatch_id),
         )
         db.record_audit(
             self._conn,
@@ -218,6 +218,7 @@ class ChannelHub:
             {
                 "ticket_id": ticket_id,
                 "branch": str(result.get("branch") or ""),
+                "base": pr.base,
                 "url": pr.url,
             },
         )

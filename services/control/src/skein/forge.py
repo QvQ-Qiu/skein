@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import re
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -20,6 +21,9 @@ _REMOTE_RE = re.compile(
     r"github\.com[/:](?P<owner>[A-Za-z0-9_.-]+)/(?P<repo>[A-Za-z0-9_.-]+?)(?:\.git)?/?$"
 )
 
+# 分支存在性缓存的存活期：develop 可能中途被建出来，不能永远缓存。
+_BASE_TTL = 600.0
+
 
 class ForgeError(RuntimeError):
     pass
@@ -30,6 +34,31 @@ class PullRequest:
     number: int
     url: str
     state: str = "open"
+    base: str = ""
+
+
+@dataclass(frozen=True)
+class RepoTarget:
+    """SKEIN_GITHUB_REPOS 的条目：平台 → 仓库与 PR 基准分支（base 空 = 自动解析）。"""
+
+    slug: str = ""
+    base: str = ""
+
+
+def normalize_repos(raw: dict[str, Any] | None) -> dict[str, RepoTarget]:
+    """值兼容 "owner/repo"、{"slug": ..., "base": ...} 与 RepoTarget 本身三种写法。"""
+    repos: dict[str, RepoTarget] = {}
+    for key, value in (raw or {}).items():
+        if isinstance(value, RepoTarget):
+            repos[str(key)] = value
+        elif isinstance(value, str):
+            repos[str(key)] = RepoTarget(slug=value)
+        elif isinstance(value, dict):
+            repos[str(key)] = RepoTarget(
+                slug=str(value.get("slug") or ""),
+                base=str(value.get("base") or ""),
+            )
+    return repos
 
 
 def github_repo_from_remote(remote: str) -> str | None:
@@ -91,7 +120,18 @@ class GitHubClient:
         url = str(data.get("html_url") or "")
         if not isinstance(number, int) or not url:
             return None
-        return PullRequest(number=number, url=url, state=str(data.get("state") or "open"))
+        raw_base = data.get("base")
+        base = str(raw_base.get("ref") or "") if isinstance(raw_base, dict) else str(raw_base or "")
+        return PullRequest(number=number, url=url, state=str(data.get("state") or "open"), base=base)
+
+    def repo_info(self, repo: str) -> dict | None:
+        status, data = self._http("GET", f"{self._api}/repos/{repo}", None)
+        return data if status == 200 and isinstance(data, dict) else None
+
+    def has_branch(self, repo: str, branch: str) -> bool:
+        url = f"{self._api}/repos/{repo}/branches/{urllib.parse.quote(branch, safe='')}"
+        status, _ = self._http("GET", url, None)
+        return status == 200
 
     def find_open(self, repo: str, head: str) -> PullRequest | None:
         owner = repo.split("/", 1)[0]
@@ -143,29 +183,58 @@ class GitHubClient:
 
 
 class PullRequestService:
-    """把一次工雁 result 变成 draft PR。"""
+    """把一次工雁 result 变成 draft PR。
+
+    基准分支解析顺序：仓库级 base → 全局 SKEIN_GITHUB_BASE → 自动
+    （仓库有 develop 用 develop，否则用仓库默认分支）。自动结果按仓库短暂缓存。
+    """
 
     def __init__(
         self,
         client: GitHubClient,
-        repos: dict[str, str] | None = None,
-        base: str = "main",
+        repos: dict[str, RepoTarget | str] | None = None,
+        base: str = "",
         draft: bool = True,
     ) -> None:
         self._client = client
-        self._repos = repos or {}
-        self._base = base
+        self._repos = normalize_repos(repos)
+        self._base = (base or "").strip()
         self._draft = draft
+        self._auto_cache: dict[str, tuple[str, float]] = {}
 
-    def _repo_for(self, result: dict) -> str | None:
+    def _target_for(self, result: dict) -> RepoTarget:
         repo = github_repo_from_remote(str(result.get("remote") or ""))
         if repo:
-            return repo
-        platform = str(result.get("platform") or "")
-        return self._repos.get(platform) or None
+            return RepoTarget(slug=repo)
+        target = self._repos.get(str(result.get("platform") or ""))
+        return target if target is not None else RepoTarget()
+
+    def base_for(self, platform: str, repo: str) -> str:
+        target = self._repos.get(platform)
+        if target is not None and target.base:
+            return target.base
+        if self._base:
+            return self._base
+        return self._auto_base(repo)
+
+    def _auto_base(self, repo: str) -> str:
+        if not repo:
+            return "main"
+        cached = self._auto_cache.get(repo)
+        if cached is not None and time.monotonic() < cached[1]:
+            return cached[0]
+        info = self._client.repo_info(repo)
+        default = str(info.get("default_branch") or "") if info else ""
+        try:
+            has_develop = self._client.has_branch(repo, "develop")
+        except ForgeError:
+            has_develop = False  # 探测失败退回默认分支，别让 PR 建不出来
+        branch = "develop" if has_develop else (default or "main")
+        self._auto_cache[repo] = (branch, time.monotonic() + _BASE_TTL)
+        return branch
 
     @staticmethod
-    def _body(ticket: dict, result: dict) -> str:
+    def _body(ticket: dict, result: dict, base: str = "") -> str:
         code = str(ticket.get("code") or "")
         title = str(ticket.get("title") or "")
         summary = str(ticket.get("summary") or "").strip()
@@ -178,6 +247,10 @@ class PullRequestService:
         parts += [
             f"- 分支：{result.get('branch') or ''}",
             f"- 基线：{result.get('base_commit') or ''}",
+        ]
+        if base:
+            parts += [f"- 目标分支：{base}（合入即触发测试环境部署）"]
+        parts += [
             "- 提交：",
             str(result.get("commits") or "（无）")[:3000],
             "",
@@ -193,16 +266,22 @@ class PullRequestService:
             return None
         if not result.get("ok") or not result.get("pushed") or not result.get("branch"):
             return None
-        repo = self._repo_for(result)
-        if repo is None:
+        target = self._target_for(result)
+        repo = target.slug
+        if repo is None or not repo:
             return None
+        platform = str(result.get("platform") or "")
+        base = self.base_for(platform, repo)
         code = str(ticket.get("code") or "")
         title = str(ticket.get("title") or "").strip() or "Skein fix"
-        return self._client.create(
+        pr = self._client.create(
             repo=repo,
             head=str(result.get("branch")),
-            base=self._base,
+            base=base,
             title=f"{code}: {title}" if code else title,
-            body=self._body(ticket, result),
+            body=self._body(ticket, result, base),
             draft=self._draft,
         )
+        if not pr.base:
+            pr = PullRequest(number=pr.number, url=pr.url, state=pr.state, base=base)
+        return pr

@@ -59,9 +59,22 @@ const delivery = computed<Delivery | null>(() => {
   }
 });
 
-const prUrl = computed(() => {
-  const item = props.detail?.dispatches.find((row) => row.pr_url);
-  return item?.pr_url ?? "";
+const prDispatch = computed(() => {
+  return props.detail?.dispatches.find((row) => row.pr_url) ?? null;
+});
+
+const prUrl = computed(() => prDispatch.value?.pr_url ?? "");
+
+const prBase = computed(() => prDispatch.value?.pr_base ?? "");
+
+const testEnvUrl = computed(() => {
+  const dispatches = props.detail?.dispatches ?? [];
+  const platform =
+    prDispatch.value?.platform ||
+    dispatches.find((row) => row.platform)?.platform ||
+    "";
+  if (!platform) return "";
+  return props.detail?.test_envs?.[platform] ?? "";
 });
 
 function statusText(status: string): string {
@@ -182,6 +195,8 @@ function textOrEmpty(value: string | null | undefined): string {
           <dl class="kv">
             <dt>分支</dt>
             <dd class="mono">{{ delivery.branch || "—" }}</dd>
+            <dt>目标分支</dt>
+            <dd class="mono">{{ prBase || "—" }}</dd>
             <dt>基线</dt>
             <dd class="mono">{{ delivery.base_commit || "—" }}</dd>
             <dt>推送</dt>
@@ -191,9 +206,20 @@ function textOrEmpty(value: string | null | undefined): string {
             <dt>变更</dt>
             <dd><pre class="diff">{{ delivery.diffstat || "无" }}</pre></dd>
           </dl>
-          <a v-if="prUrl" class="pr-link" :href="prUrl" target="_blank" rel="noreferrer">
-            打开 PR ↗
-          </a>
+          <div v-if="prUrl || testEnvUrl" class="links">
+            <a v-if="prUrl" class="pr-link" :href="prUrl" target="_blank" rel="noreferrer">
+              打开 PR ↗
+            </a>
+            <a
+              v-if="testEnvUrl"
+              class="pr-link pr-link--ghost"
+              :href="testEnvUrl"
+              target="_blank"
+              rel="noreferrer"
+            >
+              测试环境 ↗
+            </a>
+          </div>
           <p v-else class="muted pr-hint">
             {{
               delivery.pushed
@@ -628,9 +654,15 @@ function textOrEmpty(value: string | null | undefined): string {
   line-height: 1.4;
 }
 
+.links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+
 .pr-link {
   display: inline-block;
-  margin-top: 10px;
   padding: 5px 12px;
   color: #041018;
   background: var(--cyan);
@@ -643,6 +675,18 @@ function textOrEmpty(value: string | null | undefined): string {
 .pr-link:focus-visible {
   background: #7ae6f4;
   box-shadow: 0 0 12px rgba(79, 216, 235, 0.45);
+}
+
+.pr-link--ghost {
+  color: var(--cyan);
+  background: transparent;
+  box-shadow: inset 0 0 0 1px rgba(79, 216, 235, 0.55);
+}
+
+.pr-link--ghost:hover,
+.pr-link--ghost:focus-visible {
+  color: #041018;
+  background: #7ae6f4;
 }
 
 .pr-hint {

@@ -48,9 +48,11 @@ _DISPATCH_FIELDS = (
     "node_id",
     "worker_id",
     "state",
+    "platform",
     "attempt",
     "detail",
     "pr_url",
+    "pr_base",
     "updated_at",
 )
 _SESSION_FIELDS = ("id", "ticket_id", "node_id", "pinned", "created_at", "updated_at")
@@ -280,7 +282,8 @@ def _topology_view(conn: sqlite3.Connection) -> dict:
     )
     dispatches = _rows(
         conn,
-        "SELECT id, ticket_id, node_id, worker_id, state, attempt, detail, pr_url, updated_at"
+        "SELECT id, ticket_id, node_id, worker_id, state, platform, attempt, detail,"
+        " pr_url, pr_base, updated_at"
         " FROM dispatches ORDER BY updated_at DESC, id DESC LIMIT ?",
         (_TOPOLOGY_DISPATCHES,),
         _DISPATCH_FIELDS,
@@ -357,10 +360,19 @@ async def stream_frames(
         await asyncio.sleep(state.interval)
 
 
-def create_ui_router(conn: sqlite3.Connection, blob_root: str | Path, auth) -> APIRouter:
-    """挂上与控制面相同的 auth 依赖。调用方负责 include_router。"""
+def create_ui_router(
+    conn: sqlite3.Connection,
+    blob_root: str | Path,
+    auth,
+    test_envs: dict[str, str] | None = None,
+) -> APIRouter:
+    """挂上与控制面相同的 auth 依赖。调用方负责 include_router。
+
+    test_envs：平台 → 测试环境链接，随工单详情下发，交付卡片据此出链接。
+    """
     router = APIRouter(dependencies=[Depends(auth)])
     root = Path(blob_root)
+    envs = test_envs or {}
 
     @router.get("/internal/tickets/{ticket_id}")
     def get_ticket(ticket_id: str) -> dict:
@@ -391,7 +403,8 @@ def create_ui_router(conn: sqlite3.Connection, blob_root: str | Path, auth) -> A
         )
         dispatches = _rows(
             conn,
-            "SELECT id, ticket_id, node_id, worker_id, state, attempt, detail, pr_url, updated_at"
+            "SELECT id, ticket_id, node_id, worker_id, state, platform, attempt, detail,"
+            " pr_url, pr_base, updated_at"
             " FROM dispatches WHERE ticket_id = ? ORDER BY updated_at DESC, id",
             (ticket_id,),
             _DISPATCH_FIELDS,
@@ -403,6 +416,7 @@ def create_ui_router(conn: sqlite3.Connection, blob_root: str | Path, auth) -> A
             "assignments": assignments,
             "dispatches": dispatches,
             "sessions": _sessions(conn, ticket_id=ticket_id, with_last=False),
+            "test_envs": envs,
         }
 
     @router.get("/internal/events")

@@ -128,6 +128,7 @@ def create_app(
     token: str,
     platform_repos: dict[str, str] | None = None,
     pr_service: Any | None = None,
+    test_envs: dict[str, str] | None = None,
     sso_config: SsoConfig | None = None,
     sso_client: Any | None = None,
     qa_chat_upstream: str = "",
@@ -245,7 +246,7 @@ def create_app(
         window.append(now)
         return True
 
-    app.include_router(create_ui_router(conn, blob_root, auth))
+    app.include_router(create_ui_router(conn, blob_root, auth, test_envs=test_envs))
 
     @app.get("/health/live")
     def live() -> dict:

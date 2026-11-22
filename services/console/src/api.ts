@@ -48,9 +48,11 @@ export interface Dispatch {
   node_id: string;
   worker_id: string | null;
   state: string;
+  platform?: string;
   attempt: number;
   detail: unknown;
   pr_url?: string;
+  pr_base?: string;
   updated_at: number;
 }
 
@@ -72,6 +74,7 @@ export interface TicketDetailResponse {
   assignments: Assignment[];
   dispatches: Dispatch[];
   sessions: SessionRecord[];
+  test_envs?: Record<string, string>;
 }
 
 export interface Signal {

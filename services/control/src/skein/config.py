@@ -6,6 +6,8 @@ import json
 import os
 from dataclasses import dataclass, field
 
+from skein.forge import RepoTarget, normalize_repos
+
 
 @dataclass(frozen=True)
 class Config:
@@ -26,10 +28,13 @@ class Config:
     job_timeout: int = 14400
     platform_repos: dict[str, str] = field(default_factory=dict)
     github_token: str = ""
-    github_repos: dict[str, str] = field(default_factory=dict)
-    github_base: str = "main"
+    github_repos: dict[str, RepoTarget] = field(default_factory=dict)
+    # 空 = 自动：仓库有 develop 分支用 develop，否则用仓库默认分支
+    github_base: str = ""
     github_api: str = "https://api.github.com"
     github_pr_draft: bool = True
+    # {repo_slug: url}：PR 合入 develop 后可看的测试环境
+    test_envs: dict[str, str] = field(default_factory=dict)
     control_url: str = ""
     watchdog: bool = False
     watchdog_auto: bool = False
@@ -67,8 +72,17 @@ class Config:
         except json.JSONDecodeError:
             parsed_github_repos = {}
         github_repos = (
-            {str(key): str(value) for key, value in parsed_github_repos.items()}
+            normalize_repos(parsed_github_repos)
             if isinstance(parsed_github_repos, dict)
+            else {}
+        )
+        try:
+            parsed_test_envs = json.loads(source.get("SKEIN_TEST_ENVS", "") or "{}")
+        except json.JSONDecodeError:
+            parsed_test_envs = {}
+        test_envs = (
+            {str(key): str(value) for key, value in parsed_test_envs.items()}
+            if isinstance(parsed_test_envs, dict)
             else {}
         )
         return cls(
@@ -94,6 +108,7 @@ class Config:
             github_api=source.get("SKEIN_GITHUB_API", base.github_api),
             github_pr_draft=source.get("SKEIN_GITHUB_PR_DRAFT", "1")
             in ("1", "true", "yes"),
+            test_envs=test_envs,
             control_url=source.get("SKEIN_CONTROL_URL", base.control_url),
             watchdog=source.get("SKEIN_WATCHDOG", "0") in ("1", "true", "yes"),
             watchdog_auto=source.get("SKEIN_WATCHDOG_AUTO", "0")

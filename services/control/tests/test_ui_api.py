@@ -111,7 +111,9 @@ def client(tmp_path):
     blob_root = tmp_path / "blobs"
     shas = seed(conn, blob_root)
     app = FastAPI()
-    app.include_router(create_ui_router(conn, blob_root, auth_stub))
+    app.include_router(
+        create_ui_router(conn, blob_root, auth_stub, test_envs={"forum": "https://t.example"})
+    )
     with TestClient(app) as test_client:
         test_client.shas = shas
         test_client.conn = conn
@@ -178,6 +180,9 @@ def test_ticket_detail_and_missing(client):
     ]
     assert body["dispatches"][0]["detail"] == "not-json"
     assert body["dispatches"][1]["detail"] == {"step": 1}
+    assert body["dispatches"][1]["platform"] == ""
+    assert body["dispatches"][1]["pr_base"] == ""
+    assert body["test_envs"] == {"forum": "https://t.example"}
     assert [item["id"] for item in body["sessions"]] == ["s2", "s1"]
     assert body["sessions"][0]["turn_count"] == 0
     assert body["sessions"][1]["turn_count"] == 3

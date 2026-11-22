@@ -13,8 +13,22 @@ from skein import db, logbuf
 from skein.api import create_app
 from skein.config import Config
 from skein.driver import Driver, parse_schedules
-from skein.forge import GitHubClient, PullRequestService
+from skein.forge import GitHubClient, PullRequestService, github_repo_from_remote
 from skein.sso import SsoConfig
+
+
+def test_envs_by_platform(cfg: Config) -> dict[str, str]:
+    """SKEIN_TEST_ENVS 以仓库 slug 为键；控制台按平台查，这里换好键。"""
+    envs: dict[str, str] = {}
+    for platform, target in cfg.github_repos.items():
+        url = cfg.test_envs.get(target.slug, "")
+        if url:
+            envs[platform] = url
+    for platform, remote in cfg.platform_repos.items():
+        url = cfg.test_envs.get(github_repo_from_remote(remote) or "", "")
+        if url:
+            envs.setdefault(platform, url)
+    return envs
 
 
 def build() -> tuple:
@@ -44,6 +58,7 @@ def build() -> tuple:
         cfg.token,
         platform_repos=cfg.platform_repos,
         pr_service=pr_service,
+        test_envs=test_envs_by_platform(cfg),
         sso_config=sso,
         qa_chat_upstream=cfg.qa_chat_upstream,
         qa_user_secret=cfg.assertion_key,

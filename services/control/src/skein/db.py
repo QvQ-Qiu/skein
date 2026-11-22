@@ -12,7 +12,7 @@ import time
 import uuid
 from pathlib import Path
 
-SCHEMA_VERSION = 11
+SCHEMA_VERSION = 12
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS events (
@@ -147,6 +147,7 @@ CREATE TABLE IF NOT EXISTS dispatches (
     attempt     INTEGER NOT NULL DEFAULT 1,
     detail      TEXT,
     pr_url      TEXT NOT NULL DEFAULT '',
+    pr_base     TEXT NOT NULL DEFAULT '',
     updated_at  REAL NOT NULL,
     FOREIGN KEY (ticket_id) REFERENCES tickets (id)
 );
@@ -215,6 +216,7 @@ def migrate(conn: sqlite3.Connection) -> int:
     for name, ddl in (
         ("platform", "TEXT NOT NULL DEFAULT ''"),
         ("pr_url", "TEXT NOT NULL DEFAULT ''"),
+        ("pr_base", "TEXT NOT NULL DEFAULT ''"),
     ):
         if name not in dispatch_cols:
             conn.execute(f"ALTER TABLE dispatches ADD COLUMN {name} {ddl}")

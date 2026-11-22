@@ -1,4 +1,7 @@
+import json
+
 from skein.config import Config
+from skein.forge import RepoTarget
 
 
 def test_platform_repos_parsed() -> None:
@@ -29,9 +32,41 @@ def test_github_config_parsed() -> None:
         }
     )
     assert config.github_token == "tok"
-    assert config.github_repos == {"skein": "o/r"}
+    assert config.github_repos == {"skein": RepoTarget(slug="o/r")}
     assert config.github_base == "develop"
     assert config.github_pr_draft is False
+
+
+def test_github_repos_dict_form_and_base() -> None:
+    config = Config.from_env(
+        {
+            "SKEIN_GITHUB_REPOS": json.dumps(
+                {
+                    "market": {"slug": "SysuMirror/SSEMarket-Server", "base": "develop"},
+                    "mirror": {"slug": "SysuMirror/mirror"},
+                }
+            )
+        }
+    )
+    assert config.github_repos["market"] == RepoTarget(
+        slug="SysuMirror/SSEMarket-Server", base="develop"
+    )
+    assert config.github_repos["mirror"] == RepoTarget(slug="SysuMirror/mirror")
+
+
+def test_github_base_defaults_to_auto() -> None:
+    assert Config.from_env({}).github_base == ""
+
+
+def test_test_envs_parsed() -> None:
+    config = Config.from_env(
+        {"SKEIN_TEST_ENVS": json.dumps({"SysuMirror/mirror": "https://mirror-test.example"})}
+    )
+    assert config.test_envs == {"SysuMirror/mirror": "https://mirror-test.example"}
+
+
+def test_test_envs_invalid_json_is_empty() -> None:
+    assert Config.from_env({"SKEIN_TEST_ENVS": "nope"}).test_envs == {}
 
 
 def test_github_repos_invalid_json_is_empty() -> None:
