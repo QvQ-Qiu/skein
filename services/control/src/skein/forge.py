@@ -141,6 +141,23 @@ class GitHubClient:
         message = str(data.get("message") or "")
         raise ForgeError(f"github {status}: {message}"[:300])
 
+    def close(self, repo: str, number: int) -> PullRequest:
+        """关闭 PR（draft 同样适用），供验收后清理验证单。"""
+        if "/" not in repo:
+            raise ForgeError(f"invalid repo: {repo}")
+        if number <= 0:
+            raise ForgeError(f"invalid pull request number: {number}")
+        status, data = self._http(
+            "PATCH", f"{self._api}/repos/{repo}/pulls/{number}", {"state": "closed"}
+        )
+        if status == 200:
+            closed = self._pull(data)
+            if closed is not None:
+                return closed
+            raise ForgeError("github returned an unexpected pull request payload")
+        message = str(data.get("message") or "")
+        raise ForgeError(f"github {status}: {message}"[:300])
+
 
 class PullRequestService:
     """把一次工雁 result 变成 draft PR。"""

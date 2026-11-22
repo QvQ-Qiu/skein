@@ -93,3 +93,22 @@ make run-control # 控制面（HTTP）
 - `skein-control` systemd `Restart=always`；节点 WebSocket 自动重连，重启不丢状态。
 - 每日 `deploy/scripts/backup-skein.sh` 用 SQLite backup API 备份到 `/srv/skein/backups`，保留 7 天。
 - 单机 SQLite 仍是单写点；要多控制面需换 Postgres。当前规模用「进程自愈 + 每日备份 + 多节点执行」满足。
+
+## 七、PR 链路验证（SK-62AC28E5）
+
+离线端到端用例：`tests/test_pr_pipeline_e2e.py`。它用真实控制面 App + 真实
+WebSocket 通道 + 真实 `forge`，只在 GitHub API 处换成进程内假传输，模拟一次
+worker result 并断言：
+
+1. `pushed=true` 的 result 触发 forge 建 **draft** PR（`head`/`base`/标题/正文正确）；
+2. PR URL 写入 `dispatches.pr_url`，并留 `pr` 审计；
+3. 验证完调用 `GitHubClient.close(repo, number)` 关闭 PR；
+4. 删除测试工单及其派工/回执，链路可重复执行。
+
+```bash
+make test        # 含上述用例；不访问外网，不产生真实 PR
+```
+
+真实环境的验收顺序：工雁 result（`pushed=true`）→ 控制面持 `SKEIN_GITHUB_TOKEN`
+建 draft PR → 人看 `pr_url` 验收 → 关闭 PR → 清理/驳回测试工单。**令牌只在控制面**，
+节点和 worker 都拿不到，因此关 PR 与清理必须由控制面侧（或持令牌的验收人）执行。

@@ -108,3 +108,29 @@ def test_service_uses_platform_mapping_and_builds_body() -> None:
     assert payload["title"] == "SK-9: 修登录"
     assert "点登录没反应" in payload["body"]
     assert "不会自动合入" in payload["body"]
+
+
+def test_close_pull_request() -> None:
+    calls = []
+
+    def http(method, url, payload):
+        calls.append((method, url, payload))
+        return 200, {
+            "number": 7,
+            "html_url": "https://github.com/o/r/pull/7",
+            "state": "closed",
+        }
+
+    client = GitHubClient("tok", http=http)
+    pr = client.close("o/r", 7)
+
+    assert pr.state == "closed"
+    assert calls == [
+        ("PATCH", "https://api.github.com/repos/o/r/pulls/7", {"state": "closed"})
+    ]
+
+
+def test_close_failure_raises() -> None:
+    client = GitHubClient("tok", http=lambda *_: (404, {"message": "Not Found"}))
+    with pytest.raises(ForgeError):
+        client.close("o/r", 7)
