@@ -121,6 +121,103 @@ def update_dispatch(
     conn.execute(f"UPDATE dispatches SET {', '.join(sets)} WHERE id = ?", tuple(params))
 
 
+def fail_dispatch(
+    conn: sqlite3.Connection,
+    dispatch_id: str,
+    detail: str = "",
+    requeue: bool = True,
+) -> str | None:
+    """把在途派单收尾为 failed；默认把工单放回 staged，等下一次派单。
+
+    没有这条路径时，回执丢失（断线、控制面重启、worker 崩溃）会让 dispatch
+    永远停在活动态，既占节点容量，又只能等 Watchdog 报「派单超时」。
+    """
+    row = conn.execute(
+        "SELECT ticket_id, state FROM dispatches WHERE id = ?", (dispatch_id,)
+    ).fetchone()
+    if row is None:
+        return None
+    if row["state"] not in ACTIVE_STATES:
+        return row["ticket_id"]
+    now = time.time()
+    conn.execute(
+        "UPDATE dispatches SET state = 'failed', detail = ?, updated_at = ?"
+        " WHERE id = ? AND state IN ('pending', 'created', 'dispatched')",
+        (detail, now, dispatch_id),
+    )
+    if requeue:
+        conn.execute(
+            "UPDATE tickets SET status = 'staged', updated_at = ?"
+            " WHERE id = ? AND status IN ('assigned', 'running')",
+            (now, row["ticket_id"]),
+        )
+    return row["ticket_id"]
+
+
+def reconcile_node(
+    conn: sqlite3.Connection,
+    node_id: str,
+    busy_worker_ids: set[str],
+) -> list[str]:
+    """节点重连时对账：库里有在途派单，但节点已不在跑对应 worker。
+
+    节点注册消息带 `workers` 与 `busy`；重连后仍 busy 的保留，其余说明
+    ack/result 在断线窗口丢了，收尾为 failed，避免永久占容量。
+    """
+    failed: list[str] = []
+    for row in conn.execute(
+        "SELECT id, worker_id FROM dispatches"
+        " WHERE node_id = ? AND state = 'dispatched'",
+        (node_id,),
+    ):
+        worker_id = str(row["worker_id"] or "")
+        if worker_id and worker_id in busy_worker_ids:
+            continue
+        fail_dispatch(
+            conn,
+            row["id"],
+            detail="节点重连时 worker 已不在运行（回执丢失）",
+        )
+        db.record_audit(
+            conn,
+            "control",
+            "dispatch_reconcile",
+            {"dispatch_id": row["id"], "node_id": node_id, "worker_id": worker_id},
+        )
+        failed.append(row["id"])
+    return failed
+
+
+def expire_stale_dispatches(
+    conn: sqlite3.Connection,
+    older_than_s: float,
+    now: float | None = None,
+) -> list[str]:
+    """收尾长时间没有进展的派单，避免永久占用节点容量。
+
+    阈值应大于单次 worker 执行上限与 Watchdog 的超时阈值：先让 Watchdog
+    看到异常并建单，再由这里自愈。
+    """
+    cutoff = (now if now is not None else time.time()) - older_than_s
+    failed: list[str] = []
+    for row in conn.execute(
+        "SELECT id FROM dispatches"
+        " WHERE state IN ('pending', 'created', 'dispatched') AND updated_at < ?",
+        (cutoff,),
+    ):
+        fail_dispatch(
+            conn, row["id"], detail=f"stale: 超过 {int(older_than_s)}s 没有进展"
+        )
+        db.record_audit(
+            conn,
+            "control",
+            "dispatch_expired",
+            {"dispatch_id": row["id"], "older_than_s": int(older_than_s)},
+        )
+        failed.append(row["id"])
+    return failed
+
+
 def dispatch(conn: sqlite3.Connection, ticket_id: str, platform: str | None = None) -> str | None:
     """给工单挑一个节点并开派单；没有可用节点时返回 None，工单保持原状。"""
     node_id = pick_node(conn, platform)

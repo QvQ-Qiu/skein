@@ -24,6 +24,9 @@ class Config:
     jobs_file: str = ""
     driver_enabled: bool = False
     job_timeout: int = 14400
+    # 在途派单多久没有进展就收尾为 failed；0 = 关闭。默认大于 Watchdog 的 1h，
+    # 先让异常可见，再由控制面自愈。
+    dispatch_stale: int = 7200
     platform_repos: dict[str, str] = field(default_factory=dict)
     control_url: str = ""
     watchdog: bool = False
@@ -75,6 +78,7 @@ class Config:
             jobs_file=source.get("SKEIN_JOBS_FILE", base.jobs_file),
             driver_enabled=source.get("SKEIN_DRIVER", "0") in ("1", "true", "yes"),
             job_timeout=int(source.get("SKEIN_JOB_TIMEOUT", base.job_timeout)),
+            dispatch_stale=int(source.get("SKEIN_DISPATCH_STALE", base.dispatch_stale)),
             platform_repos=platform_repos,
             control_url=source.get("SKEIN_CONTROL_URL", base.control_url),
             watchdog=source.get("SKEIN_WATCHDOG", "0") in ("1", "true", "yes"),

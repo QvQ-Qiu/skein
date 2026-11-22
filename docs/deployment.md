@@ -43,6 +43,8 @@ SKEIN_DISPATCH=0
 SKEIN_DRIVER=1
 SKEIN_JOBS_FILE=/etc/skein/jobs.json
 SKEIN_PLATFORM_REPOS={"forum":"/home/cloud/repos/skein"}
+# 在途派单超过 2h 没有进展就收尾并回退工单；设 0 关闭
+SKEIN_DISPATCH_STALE=7200
 
 SKEIN_SSO_BASE=https://sso.ssemarket.cn
 SKEIN_SSO_CLIENT_ID=app_xxxx

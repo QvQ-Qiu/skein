@@ -18,6 +18,7 @@ import { fileURLToPath } from 'node:url';
 import { TranscriptSync } from './transcript-sync.mjs';
 import { buildSandboxArgs, sandboxSupported, unitName } from './sandbox.mjs';
 import { workerEnvironment } from './worker-env.mjs';
+import { Outbox, isCritical } from './outbox.mjs';
 
 const env = process.env;
 const CONTROLLER_URL = env.CONTROLLER_URL || 'ws://127.0.0.1:3030/api/agent/channel';
@@ -62,7 +63,27 @@ const busy = new Map();      // worker_id → child process
 const cancelled = new Set();
 let ws = null, backoff = 1000, hbTimer = null;
 
-function send(msg) { if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(msg)); }
+const outbox = new Outbox({ log: (line) => console.log(line) });
+
+/** 直接把消息写到当前连接；返回 false 表示链路不可写。 */
+function write(msg) {
+  if (!ws || ws.readyState !== WebSocket.OPEN) return false;
+  try { ws.send(JSON.stringify(msg)); return true; } catch { return false; }
+}
+
+/**
+ * 关键回执（worker.created/ack/result…）断线时先入队，重连后按序补发；
+ * 其余消息（progress/心跳）断线时直接丢，不补发过时进度。
+ */
+function send(msg, critical = isCritical(msg)) {
+  if (critical) {
+    outbox.push(msg);
+    outbox.flush(write);
+    return outbox.size === 0;
+  }
+  if (!outbox.flush(write)) return false;  // 旧回执还没补完，别插队
+  return write(msg);
+}
 function git(repo, ...args) { return execFileSync('git', ['-C', repo, ...args], { encoding: 'utf8', timeout: 60_000 }).trim(); }
 const sandboxed = env.IS_SANDBOX === '1' || existsSync('/.dockerenv') || !!env.POD_NAME;
 const ccEnv = { ...env, ...(sandboxed ? { IS_SANDBOX: '1' } : {}) };
@@ -313,13 +334,19 @@ function connect() {
   ws = new WebSocket(CONTROLLER_URL);
   ws.on('open', () => {
     backoff = 1000;
-    send({
+    // register 必须先发；随后补发断线期间攒下的关键回执。
+    write({
       t: 'node.register', node_id: NODE_ID, token: AGENT_TOKEN,
       name: env.NODE_NAME || NODE_ID, host: hostname(), pod: env.POD_NAME || '',
       platforms: PLATFORMS, repos: REPO_MAP, max_workers: MAX_WORKERS, peer_url: PEER_URL,
       meta: { version: '0.3.0', push: PUSH_BRANCH },
       workers: Object.entries(state.workers).map(([id, w]) => ({ worker_id: id, session_id: w.session_id, platform: w.platform, repo: w.repo, name: w.name, busy: busy.has(id) })),
     });
+    if (outbox.size > 0) {
+      const pending = outbox.size;
+      outbox.flush(write);
+      console.log(`[node] 补发断线期间回执 ${pending - outbox.size}/${pending} 条`);
+    }
     clearInterval(hbTimer);
     hbTimer = setInterval(() => send({ t: 'node.heartbeat' }), HEARTBEAT_MS);
   });

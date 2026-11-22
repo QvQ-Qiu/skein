@@ -35,19 +35,32 @@ def make_ticket(conn, code="SK-1"):
     return code
 
 
-def register(ws, token=TOKEN, node_id="n1"):
-    ws.send_json(
-        {
-            "t": "node.register",
-            "node_id": node_id,
-            "token": token,
-            "name": "node-1",
-            "platforms": ["forum"],
-            "max_workers": 2,
-            "peer_url": "ws://127.0.0.1:9101/peer",
-        }
-    )
+def register(ws, token=TOKEN, node_id="n1", workers=None):
+    payload = {
+        "t": "node.register",
+        "node_id": node_id,
+        "token": token,
+        "name": "node-1",
+        "platforms": ["forum"],
+        "max_workers": 2,
+        "peer_url": "ws://127.0.0.1:9101/peer",
+    }
+    if workers is not None:
+        payload["workers"] = workers
+    ws.send_json(payload)
     return ws.receive_json()
+
+
+def wait_dispatch_state(conn, dispatch_id, state, timeout=2.0):
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        row = conn.execute(
+            "SELECT state FROM dispatches WHERE id = ?", (dispatch_id,)
+        ).fetchone()
+        if row is not None and row[0] == state:
+            return True
+        time.sleep(0.02)
+    return False
 
 
 def test_register_rejects_bad_token(app_client):
@@ -158,3 +171,106 @@ def test_cancel_without_live_dispatch_conflicts(app_client):
         headers={"X-Skein-Token": TOKEN},
     )
     assert response.status_code == 409
+
+
+def test_duplicate_dispatch_is_rejected(app_client):
+    ticket = make_ticket(app_client.conn, code="SK-DUP")
+    with app_client.websocket_connect("/api/agent/channel") as ws:
+        register(ws)
+        first = app_client.post(
+            f"/internal/tickets/{ticket}/dispatch?platform=forum",
+            headers={"X-Skein-Token": TOKEN},
+        ).json()
+        assert first["ok"] is True
+        ws.receive_json()
+        second = app_client.post(
+            f"/internal/tickets/{ticket}/dispatch?platform=forum",
+            headers={"X-Skein-Token": TOKEN},
+        ).json()
+        assert second == {
+            "ok": False,
+            "reason": "already_active",
+            "dispatch_id": first["dispatch_id"],
+        }
+
+
+def test_dispatch_missing_ticket(app_client):
+    with app_client.websocket_connect("/api/agent/channel") as ws:
+        register(ws)
+        response = app_client.post(
+            "/internal/tickets/nope/dispatch?platform=forum",
+            headers={"X-Skein-Token": TOKEN},
+        )
+        assert response.json()["reason"] == "ticket_not_found"
+
+
+def test_nack_fails_dispatch_and_requeues_ticket(app_client):
+    conn = app_client.conn
+    ticket = make_ticket(conn, code="SK-N1")
+    with app_client.websocket_connect("/api/agent/channel") as ws:
+        register(ws)
+        body = app_client.post(
+            f"/internal/tickets/{ticket}/dispatch?platform=forum",
+            headers={"X-Skein-Token": TOKEN},
+        ).json()
+        ws.receive_json()  # worker.create
+        ws.send_json(
+            {"t": "nack", "ticket_id": ticket, "worker_id": body["worker_id"], "reason": "busy"}
+        )
+        assert wait_dispatch_state(conn, body["dispatch_id"], "failed")
+    status = conn.execute("SELECT status FROM tickets WHERE id = ?", (ticket,)).fetchone()[0]
+    assert status == "staged"
+
+
+def test_worker_created_after_control_restart_recovers(app_client, tmp_path):
+    conn = app_client.conn
+    ticket = make_ticket(conn, code="SK-R1")
+    with app_client.websocket_connect("/api/agent/channel") as ws:
+        register(ws)
+        body = app_client.post(
+            f"/internal/tickets/{ticket}/dispatch?platform=forum",
+            headers={"X-Skein-Token": TOKEN},
+        ).json()
+        assert body["ok"] is True
+        ws.receive_json()  # worker.create；连接随即断开，worker.created 没回来
+
+    # 新的 create_app 相当于控制面重启：内存里的 _pending 已丢。
+    restarted = create_app(
+        conn, str(tmp_path / "blobs"), TOKEN, platform_repos={"forum": "/srv/repo"}
+    )
+    with (
+        TestClient(restarted) as client2,
+        client2.websocket_connect("/api/agent/channel") as ws2,
+    ):
+        register(ws2)
+        ws2.send_json(
+            {"t": "worker.created", "worker_id": body["worker_id"], "session_id": "sess-r"}
+        )
+        message = ws2.receive_json()
+        assert message["t"] == "dispatch"
+        assert message["ticket"]["code"] == ticket
+
+
+def test_reconnect_reconciles_lost_result(app_client):
+    conn = app_client.conn
+    ticket = make_ticket(conn, code="SK-RC")
+    with app_client.websocket_connect("/api/agent/channel") as ws:
+        register(ws)
+        body = app_client.post(
+            f"/internal/tickets/{ticket}/dispatch?platform=forum",
+            headers={"X-Skein-Token": TOKEN},
+        ).json()
+        ws.receive_json()  # worker.create
+        ws.send_json(
+            {"t": "worker.created", "worker_id": body["worker_id"], "session_id": "sess-rc"}
+        )
+        assert ws.receive_json()["t"] == "dispatch"
+        assert wait_dispatch_state(conn, body["dispatch_id"], "dispatched")
+        # 断线期间 result 丢失：连接关闭，控制面仍以为在跑。
+
+    # 节点重连并上报 worker 已空闲：控制面据此收尾，工单回 staged。
+    with app_client.websocket_connect("/api/agent/channel") as ws2:
+        register(ws2, workers=[{"worker_id": body["worker_id"], "busy": False}])
+        assert wait_dispatch_state(conn, body["dispatch_id"], "failed")
+    status = conn.execute("SELECT status FROM tickets WHERE id = ?", (ticket,)).fetchone()[0]
+    assert status == "staged"

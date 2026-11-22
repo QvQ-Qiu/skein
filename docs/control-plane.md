@@ -45,6 +45,7 @@ make run-control # 控制面（HTTP）
 | `SKEIN_AGENT_MODEL` | `deepseek-v4-flash-vision-exp` | 控制台 Agent 模型 |
 | `SKEIN_DISPATCH` | `0` | 事件是否自动建单（当前人工/Agent 建单） |
 | `SKEIN_DRIVER` / `SKEIN_JOBS_FILE` | `0` / 空 | 定时作业驱动 |
+| `SKEIN_DISPATCH_STALE` | `7200` | 在途派单多久无进展就收尾为 failed 并回退工单；`0` 关闭 |
 | `SKEIN_PLATFORM_REPOS` | 空 | 平台 → 仓库路径 JSON |
 | `SKEIN_WATCHDOG*` | 关 | 信号、自动建单、每日巡检 |
 | `SKEIN_SSO_*` | 空 | UniSSO 内接 |

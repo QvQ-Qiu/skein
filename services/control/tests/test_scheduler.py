@@ -87,3 +87,65 @@ def test_update_dispatch(conn):
     scheduler.update_dispatch(conn, dispatch_id, state="created", worker_id="w1", detail="ok")
     row = conn.execute("SELECT state, worker_id, detail FROM dispatches").fetchone()
     assert tuple(row) == ("created", "w1", "ok")
+
+
+def test_fail_dispatch_requeues_ticket(conn):
+    scheduler.upsert_node(conn, "n1")
+    ticket = make_ticket(conn)
+    dispatch_id = scheduler.dispatch(conn, ticket)
+    scheduler.update_dispatch(conn, dispatch_id, state="dispatched", worker_id="w1")
+    assert scheduler.fail_dispatch(conn, dispatch_id, "boom") == ticket
+    row = conn.execute(
+        "SELECT state, detail FROM dispatches WHERE id = ?", (dispatch_id,)
+    ).fetchone()
+    assert tuple(row) == ("failed", "boom")
+    status = conn.execute("SELECT status FROM tickets WHERE id = ?", (ticket,)).fetchone()[0]
+    assert status == "staged"
+
+
+def test_fail_dispatch_keeps_terminal_state(conn):
+    scheduler.upsert_node(conn, "n1")
+    ticket = make_ticket(conn)
+    dispatch_id = scheduler.dispatch(conn, ticket)
+    scheduler.update_dispatch(conn, dispatch_id, state="done", worker_id="w1")
+    scheduler.fail_dispatch(conn, dispatch_id, "late")
+    state = conn.execute("SELECT state FROM dispatches WHERE id = ?", (dispatch_id,)).fetchone()[0]
+    assert state == "done"
+
+
+def test_reconcile_node_fails_lost_receipt(conn):
+    scheduler.upsert_node(conn, "n1")
+    ticket = make_ticket(conn)
+    dispatch_id = scheduler.dispatch(conn, ticket)
+    scheduler.update_dispatch(conn, dispatch_id, state="dispatched", worker_id="w1")
+    assert scheduler.reconcile_node(conn, "n1", set()) == [dispatch_id]
+    state = conn.execute("SELECT state FROM dispatches WHERE id = ?", (dispatch_id,)).fetchone()[0]
+    status = conn.execute("SELECT status FROM tickets WHERE id = ?", (ticket,)).fetchone()[0]
+    assert (state, status) == ("failed", "staged")
+
+
+def test_reconcile_node_keeps_busy_worker(conn):
+    scheduler.upsert_node(conn, "n1")
+    ticket = make_ticket(conn)
+    dispatch_id = scheduler.dispatch(conn, ticket)
+    scheduler.update_dispatch(conn, dispatch_id, state="dispatched", worker_id="w1")
+    assert scheduler.reconcile_node(conn, "n1", {"w1"}) == []
+    state = conn.execute("SELECT state FROM dispatches WHERE id = ?", (dispatch_id,)).fetchone()[0]
+    assert state == "dispatched"
+
+
+def test_expire_stale_dispatches_only_old(conn):
+    scheduler.upsert_node(conn, "n1")
+    old_ticket = make_ticket(conn, code="SK-OLD")
+    fresh_ticket = make_ticket(conn, code="SK-FRESH")
+    old = scheduler.dispatch(conn, old_ticket)
+    fresh = scheduler.dispatch(conn, fresh_ticket)
+    conn.execute(
+        "UPDATE dispatches SET updated_at = ? WHERE id = ?", (time.time() - 7200, old)
+    )
+    assert scheduler.expire_stale_dispatches(conn, 3600) == [old]
+    states = dict(
+        conn.execute("SELECT id, state FROM dispatches").fetchall()
+    )
+    assert states[old] == "failed"
+    assert states[fresh] == "pending"

@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import json
 import logging
+import signal
 import sqlite3
 import subprocess
 import threading
+import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
@@ -109,15 +111,63 @@ def parse_schedules(raw: str) -> list[Schedule]:
     return result
 
 
+DETAIL_HEAD = 400
+DETAIL_TAIL = 600
+
+
+def _status_label(returncode: int) -> str:
+    """退出码 >0 记 exit=N；被信号杀死记 signal=N (NAME)。
+
+    作业被 SIGKILL 时不会打印 traceback，只看输出尾部无法和「正常结束但没写
+    收尾日志」区分，所以退出状态必须显式落进 detail。
+    """
+    if returncode < 0:
+        number = -returncode
+        try:
+            name = signal.Signals(number).name
+        except ValueError:
+            name = "SIG?"
+        return f"signal={number} ({name})"
+    return f"exit={returncode}"
+
+
+def _clip(output: str) -> str:
+    """保留头+尾：只看尾部会把命令开头和前半段线索整段丢掉。"""
+    text = output.strip()
+    if len(text) <= DETAIL_HEAD + DETAIL_TAIL:
+        return text
+    omitted = len(text) - DETAIL_HEAD - DETAIL_TAIL
+    return f"{text[:DETAIL_HEAD]}\n…（省略 {omitted} 字）…\n{text[-DETAIL_TAIL:]}"
+
+
+def _text(value: str | bytes | None) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, bytes):
+        return value.decode("utf-8", "replace")
+    return value
+
+
+def _detail(status: str, elapsed: float, output: str) -> str:
+    head = f"{status} in {elapsed:.0f}s"
+    clipped = _clip(output)
+    return f"{head}\n{clipped}" if clipped else head
+
+
 def subprocess_runner(command: str, timeout: float) -> tuple[bool, str]:
+    started = time.monotonic()
     try:
         proc = subprocess.run(
             command, check=False, shell=True, capture_output=True, timeout=timeout, text=True
         )
-    except subprocess.TimeoutExpired:
-        return False, f"timeout after {int(timeout)}s"
-    output = ((proc.stdout or "") + (proc.stderr or "")).strip()
-    return proc.returncode == 0, output[-500:]
+    except subprocess.TimeoutExpired as exc:
+        elapsed = time.monotonic() - started
+        partial = _text(exc.stdout) + _text(exc.stderr)
+        return False, _detail(f"timeout after {int(timeout)}s", elapsed, partial)
+    elapsed = time.monotonic() - started
+    output = (proc.stdout or "") + (proc.stderr or "")
+    ok = proc.returncode == 0
+    return ok, _detail("ok" if ok else _status_label(proc.returncode), elapsed, output)
 
 
 class Driver:

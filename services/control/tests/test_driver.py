@@ -3,7 +3,7 @@ from datetime import datetime
 import pytest
 
 from skein import db, runs
-from skein.driver import Driver, cron_matches, parse_schedules
+from skein.driver import Driver, cron_matches, parse_schedules, subprocess_runner
 
 
 @pytest.fixture()
@@ -130,3 +130,43 @@ def test_failed_command_marks_failed(conn):
     )
     driver.tick(datetime(2026, 11, 18, 9, 15))
     assert runs.by_day(conn, "daily", "2026-11-18T09:15").status == "failed"
+
+
+def test_subprocess_runner_records_exit_status():
+    ok, detail = subprocess_runner("echo boom >&2; exit 3", 30)
+    assert ok is False
+    assert detail.startswith("exit=3 in ")
+    assert "boom" in detail
+
+
+def test_subprocess_runner_distinguishes_signal_kill():
+    # 被 SIGKILL 的作业不会打印 traceback，detail 必须能看出是信号杀死的。
+    ok, detail = subprocess_runner("kill -KILL $$", 30)
+    assert ok is False
+    assert "signal=9 (SIGKILL)" in detail
+
+
+def test_subprocess_runner_keeps_head_and_tail():
+    ok, detail = subprocess_runner(
+        "printf 'HEAD-MARK '; head -c 3000 /dev/zero | tr '\\0' 'x'; printf ' TAIL-MARK'; exit 1",
+        30,
+    )
+    assert ok is False
+    assert "HEAD-MARK" in detail
+    assert "TAIL-MARK" in detail
+    assert "省略" in detail
+
+
+def test_subprocess_runner_timeout_keeps_partial_output():
+    # exec 让 sleep 顶替 shell，超时被杀的才是 sleep 本身，不留孤儿进程。
+    ok, detail = subprocess_runner("echo before-timeout; exec sleep 10", 1)
+    assert ok is False
+    assert "timeout after 1s" in detail
+    assert "before-timeout" in detail
+
+
+def test_subprocess_runner_success_is_marked_ok():
+    ok, detail = subprocess_runner("echo hello", 30)
+    assert ok is True
+    assert detail.startswith("ok in ")
+    assert "hello" in detail
