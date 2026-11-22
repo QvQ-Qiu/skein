@@ -196,3 +196,20 @@ def test_auto_base_falls_back_to_default_when_branch_probe_fails() -> None:
 
     service = PullRequestService(GitHubClient("tok", http=http))
     assert service.base_for("", "o/r") == "prod"
+
+
+def test_auto_base_failure_is_not_cached() -> None:
+    """探测网络失败退回默认分支，但不缓存：恢复后下一次要探出 develop。"""
+    calls = {"branches": 0}
+
+    def http(method, url, payload):
+        if url.endswith("/repos/o/r"):
+            return 200, {"default_branch": "prod"}
+        calls["branches"] += 1
+        if calls["branches"] == 1:
+            raise ForgeError("network down")
+        return 200, {"name": "develop"}
+
+    service = PullRequestService(GitHubClient("tok", http=http))
+    assert service.base_for("", "o/r") == "prod"
+    assert service.base_for("", "o/r") == "develop"

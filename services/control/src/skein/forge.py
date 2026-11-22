@@ -228,7 +228,8 @@ class PullRequestService:
         try:
             has_develop = self._client.has_branch(repo, "develop")
         except ForgeError:
-            has_develop = False  # 探测失败退回默认分支，别让 PR 建不出来
+            # 网络抖动 ≠ 仓库没有 develop：退回默认分支，但不缓存，下次重新探测
+            return default or "main"
         branch = "develop" if has_develop else (default or "main")
         self._auto_cache[repo] = (branch, time.monotonic() + _BASE_TTL)
         return branch
