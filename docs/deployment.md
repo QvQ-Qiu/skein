@@ -51,6 +51,11 @@ SKEIN_SSO_CLIENT_SECRET=sk_xxxx
 SKEIN_QA_CHAT_UPSTREAM=http://127.0.0.1:8119
 SKEIN_ASSERTION_KEY=<与小秋 chat 的 SKEIN_USER_SECRET 相同>
 
+# 工雁 push 后由控制面建 draft PR；令牌只放 A，不进节点
+SKEIN_GITHUB_TOKEN=<fine-grained PAT: pull_requests:write + contents:read>
+SKEIN_GITHUB_REPOS={"skein":"QvQ-Qiu/skein"}
+SKEIN_GITHUB_BASE=main
+
 SKEIN_WATCHDOG=1
 SKEIN_WATCHDOG_TICKETS=1
 SKEIN_WATCHDOG_DISPATCH=1

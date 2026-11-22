@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import sqlite3
@@ -14,6 +15,7 @@ from fastapi import WebSocket
 from starlette.websockets import WebSocketDisconnect
 
 from skein import db, scheduler
+from skein.forge import PullRequestService
 
 log = logging.getLogger("skein.channel")
 
@@ -24,10 +26,12 @@ class ChannelHub:
         conn: sqlite3.Connection,
         token: str,
         platform_repos: dict[str, str] | None = None,
+        pr_service: PullRequestService | None = None,
     ) -> None:
         self._conn = conn
         self._token = token
         self._repos = platform_repos or {}
+        self._pr = pr_service
         self._sockets: dict[str, WebSocket] = {}
         self._pending: dict[str, dict] = {}
 
@@ -92,7 +96,7 @@ class ChannelHub:
             return node_id
 
         if kind == "result":
-            self._on_result(msg)
+            await self._on_result(msg)
             return node_id
 
         if kind == "ack":
@@ -147,30 +151,76 @@ class ChannelHub:
             }
         )
 
-    def _on_result(self, msg: dict) -> None:
+    async def _on_result(self, msg: dict) -> None:
         worker_id = str(msg.get("worker_id") or "")
         dispatch_id = self._dispatch_of(worker_id)
         if not dispatch_id:
             return
         row = self._conn.execute(
-            "SELECT ticket_id FROM dispatches WHERE id = ?", (dispatch_id,)
+            "SELECT ticket_id, platform FROM dispatches WHERE id = ?", (dispatch_id,)
         ).fetchone()
         scheduler.update_dispatch(self._conn, dispatch_id, state="done")
-        if row:
-            ticket_id = row["ticket_id"]
-            log.info("result worker=%s ticket=%s", worker_id, ticket_id)
-            self._conn.execute(
-                "INSERT OR IGNORE INTO assignments (ticket_id, worker_id, state, result, updated_at)"
-                " VALUES (?, ?, 'done', ?, ?)",
-                (ticket_id, worker_id, json.dumps(msg.get("result") or {}, ensure_ascii=False), time.time()),
+        if not row:
+            return
+        ticket_id = row["ticket_id"]
+        result = msg.get("result") or {}
+        if isinstance(result, dict) and not result.get("platform"):
+            result["platform"] = row["platform"] or ""
+        log.info("result worker=%s ticket=%s", worker_id, ticket_id)
+        self._conn.execute(
+            "INSERT OR IGNORE INTO assignments (ticket_id, worker_id, state, result, updated_at)"
+            " VALUES (?, ?, 'done', ?, ?)",
+            (ticket_id, worker_id, json.dumps(result, ensure_ascii=False), time.time()),
+        )
+        self._conn.execute(
+            "UPDATE tickets SET status = 'review', updated_at = ? WHERE id = ?",
+            (time.time(), ticket_id),
+        )
+        db.record_audit(
+            self._conn, "node", "result", {"ticket_id": ticket_id, "worker_id": worker_id}
+        )
+        if self._pr is None or not isinstance(result, dict):
+            return
+        ticket = self._conn.execute(
+            "SELECT code, title, summary FROM tickets WHERE id = ?", (ticket_id,)
+        ).fetchone()
+        if ticket is None:
+            return
+        try:
+            pr = await asyncio.to_thread(
+                self._pr.open_for,
+                {
+                    "code": ticket["code"],
+                    "title": ticket["title"],
+                    "summary": ticket["summary"] or "",
+                },
+                result,
             )
-            self._conn.execute(
-                "UPDATE tickets SET status = 'review', updated_at = ? WHERE id = ?",
-                (time.time(), ticket_id),
-            )
+        except Exception as exc:  # noqa: BLE001 - PR 失败不能影响验收
+            log.warning("pr create failed ticket=%s: %s", ticket_id, exc)
             db.record_audit(
-                self._conn, "node", "result", {"ticket_id": ticket_id, "worker_id": worker_id}
+                self._conn,
+                "skein",
+                "pr_error",
+                {"ticket_id": ticket_id, "error": str(exc)[:300]},
             )
+            return
+        if pr is None:
+            return
+        self._conn.execute(
+            "UPDATE dispatches SET pr_url = ?, updated_at = ? WHERE id = ?",
+            (pr.url, time.time(), dispatch_id),
+        )
+        db.record_audit(
+            self._conn,
+            "skein",
+            "pr",
+            {
+                "ticket_id": ticket_id,
+                "branch": str(result.get("branch") or ""),
+                "url": pr.url,
+            },
+        )
 
     def _dispatch_of(self, worker_id: object) -> str | None:
         if not worker_id:
@@ -189,7 +239,9 @@ class ChannelHub:
         if ws is None:
             return {"ok": False, "reason": "node_not_connected"}
 
-        dispatch_id = scheduler.open_dispatch(self._conn, ticket_id, node_id)
+        dispatch_id = scheduler.open_dispatch(
+            self._conn, ticket_id, node_id, platform or ""
+        )
         worker_id = f"w-{dispatch_id[:8]}"
         self._pending[worker_id] = {
             "dispatch_id": dispatch_id,

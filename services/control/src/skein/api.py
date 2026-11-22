@@ -127,6 +127,7 @@ def create_app(
     blob_root: str,
     token: str,
     platform_repos: dict[str, str] | None = None,
+    pr_service: Any | None = None,
     sso_config: SsoConfig | None = None,
     sso_client: Any | None = None,
     qa_chat_upstream: str = "",
@@ -138,7 +139,7 @@ def create_app(
 ) -> FastAPI:
     app = FastAPI(title="skein-control", version="0.1.0")
     sessions = SessionStore(conn, blob_root)
-    hub = ChannelHub(conn, token, platform_repos or {})
+    hub = ChannelHub(conn, token, platform_repos or {}, pr_service=pr_service)
     agent = (
         Agent(conn, llm_base, llm_key, agent_model, hub)
         if llm_base and llm_key

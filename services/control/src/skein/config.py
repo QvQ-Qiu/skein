@@ -25,6 +25,11 @@ class Config:
     driver_enabled: bool = False
     job_timeout: int = 14400
     platform_repos: dict[str, str] = field(default_factory=dict)
+    github_token: str = ""
+    github_repos: dict[str, str] = field(default_factory=dict)
+    github_base: str = "main"
+    github_api: str = "https://api.github.com"
+    github_pr_draft: bool = True
     control_url: str = ""
     watchdog: bool = False
     watchdog_auto: bool = False
@@ -55,6 +60,17 @@ class Config:
             if isinstance(parsed_repos, dict)
             else {}
         )
+        try:
+            parsed_github_repos = json.loads(
+                source.get("SKEIN_GITHUB_REPOS", "") or "{}"
+            )
+        except json.JSONDecodeError:
+            parsed_github_repos = {}
+        github_repos = (
+            {str(key): str(value) for key, value in parsed_github_repos.items()}
+            if isinstance(parsed_github_repos, dict)
+            else {}
+        )
         return cls(
             db_path=source.get("SKEIN_DB", base.db_path),
             blob_root=source.get("SKEIN_BLOB_ROOT", base.blob_root),
@@ -72,6 +88,12 @@ class Config:
             driver_enabled=source.get("SKEIN_DRIVER", "0") in ("1", "true", "yes"),
             job_timeout=int(source.get("SKEIN_JOB_TIMEOUT", base.job_timeout)),
             platform_repos=platform_repos,
+            github_token=source.get("SKEIN_GITHUB_TOKEN", base.github_token),
+            github_repos=github_repos,
+            github_base=source.get("SKEIN_GITHUB_BASE", base.github_base),
+            github_api=source.get("SKEIN_GITHUB_API", base.github_api),
+            github_pr_draft=source.get("SKEIN_GITHUB_PR_DRAFT", "1")
+            in ("1", "true", "yes"),
             control_url=source.get("SKEIN_CONTROL_URL", base.control_url),
             watchdog=source.get("SKEIN_WATCHDOG", "0") in ("1", "true", "yes"),
             watchdog_auto=source.get("SKEIN_WATCHDOG_AUTO", "0")

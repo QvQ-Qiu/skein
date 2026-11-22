@@ -57,6 +57,8 @@ docs/                 当前文档
 2. **建单/合并**：同帖已有活跃工单时评论/楼中楼作为 followup 合并，不重复建单。
 3. **派工**：管理员在控制台派单，或 Agent/Console 调 `/internal/tickets/{id}/dispatch`；
    节点 WebSocket 建 worker，工雁在 worktree 完成并回传结果。
+   若结果已 push 且 remote 是 GitHub，控制面自动建 **draft PR**（需 `SKEIN_GITHUB_TOKEN`），
+   PR URL 写回工单详情。
 4. **验收/回写**：管理员 approve → `public_status=fixed` → 控制面调小秋
    `/internal/skein/notify` → 小秋以机器人账号回原帖；reject 回 `need_info`。
 5. **定时作业**：`/etc/skein/jobs.json` 驱动 tech-digest ingest/daily/star/weekly、

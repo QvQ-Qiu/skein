@@ -13,6 +13,7 @@ from skein import db, logbuf
 from skein.api import create_app
 from skein.config import Config
 from skein.driver import Driver, parse_schedules
+from skein.forge import GitHubClient, PullRequestService
 from skein.sso import SsoConfig
 
 
@@ -29,11 +30,20 @@ def build() -> tuple:
         client_secret=cfg.sso_client_secret,
         cookie_domain=cfg.sso_cookie_domain,
     )
+    pr_service = None
+    if cfg.github_token:
+        pr_service = PullRequestService(
+            GitHubClient(cfg.github_token, api=cfg.github_api),
+            repos=cfg.github_repos,
+            base=cfg.github_base,
+            draft=cfg.github_pr_draft,
+        )
     app = create_app(
         conn,
         cfg.blob_root,
         cfg.token,
         platform_repos=cfg.platform_repos,
+        pr_service=pr_service,
         sso_config=sso,
         qa_chat_upstream=cfg.qa_chat_upstream,
         qa_user_secret=cfg.assertion_key,

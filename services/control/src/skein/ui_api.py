@@ -50,6 +50,7 @@ _DISPATCH_FIELDS = (
     "state",
     "attempt",
     "detail",
+    "pr_url",
     "updated_at",
 )
 _SESSION_FIELDS = ("id", "ticket_id", "node_id", "pinned", "created_at", "updated_at")
@@ -279,7 +280,7 @@ def _topology_view(conn: sqlite3.Connection) -> dict:
     )
     dispatches = _rows(
         conn,
-        "SELECT id, ticket_id, node_id, worker_id, state, attempt, detail, updated_at"
+        "SELECT id, ticket_id, node_id, worker_id, state, attempt, detail, pr_url, updated_at"
         " FROM dispatches ORDER BY updated_at DESC, id DESC LIMIT ?",
         (_TOPOLOGY_DISPATCHES,),
         _DISPATCH_FIELDS,
@@ -390,7 +391,7 @@ def create_ui_router(conn: sqlite3.Connection, blob_root: str | Path, auth) -> A
         )
         dispatches = _rows(
             conn,
-            "SELECT id, ticket_id, node_id, worker_id, state, attempt, detail, updated_at"
+            "SELECT id, ticket_id, node_id, worker_id, state, attempt, detail, pr_url, updated_at"
             " FROM dispatches WHERE ticket_id = ? ORDER BY updated_at DESC, id",
             (ticket_id,),
             _DISPATCH_FIELDS,

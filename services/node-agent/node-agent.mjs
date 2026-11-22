@@ -220,17 +220,18 @@ async function runTask(msg) {
   const cc = await p;
   busy.delete(worker_id);
   if (cancelled.has(ticket.id)) { cancelled.delete(ticket.id); return; }
-  let branchNow = '', commits = '', diffstat = '';
+  let branchNow = '', commits = '', diffstat = '', remote = '';
   try {
     branchNow = git(repo, 'branch', '--show-current');
     commits = git(repo, 'log', '--oneline', `${baseCommit}..HEAD`);
     diffstat = git(repo, 'diff', '--stat', `${baseCommit}..HEAD`);
+    remote = git(repo, 'remote', 'get-url', 'origin');
     if (PUSH_BRANCH && commits) git(repo, 'push', '-u', 'origin', branchNow);
   } catch {}
   if (cc.sessionId) { w.session_id = cc.sessionId; saveState(); }
   send({
     t: 'result', ticket_id: ticket.id, worker_id,
-    result: { ok: cc.ok, branch: branchNow, base_commit: baseCommit, commits, diffstat, pushed: PUSH_BRANCH && !!commits, summary: cc.summary, session_id: cc.sessionId, tests: '见总结（cc 自测报告）' },
+    result: { ok: cc.ok, branch: branchNow, base_commit: baseCommit, commits, diffstat, pushed: PUSH_BRANCH && !!commits, summary: cc.summary, session_id: cc.sessionId, tests: '见总结（cc 自测报告）', platform: ticket.platform || w.platform || '', remote },
   });
   if (transcriptSync) {
     const sessionId = cc.sessionId || w.session_id;

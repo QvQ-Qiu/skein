@@ -50,6 +50,7 @@ export interface Dispatch {
   state: string;
   attempt: number;
   detail: unknown;
+  pr_url?: string;
   updated_at: number;
 }
 

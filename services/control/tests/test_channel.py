@@ -5,22 +5,37 @@ from fastapi.testclient import TestClient
 
 from skein import db
 from skein.api import create_app
+from skein.forge import PullRequest
 
 TOKEN = "chan-token"
+
+
+class FakePR:
+    def __init__(self) -> None:
+        self.calls = []
+
+    def open_for(self, ticket, result):
+        self.calls.append((ticket, result))
+        if not result.get("pushed") or not result.get("branch"):
+            return None
+        return PullRequest(number=1, url="https://github.com/o/r/pull/1")
 
 
 @pytest.fixture()
 def app_client(tmp_path):
     conn = db.connect(tmp_path / "chan.db")
     db.migrate(conn)
+    pr = FakePR()
     app = create_app(
         conn,
         str(tmp_path / "blobs"),
         TOKEN,
         platform_repos={"forum": "/srv/repo"},
+        pr_service=pr,
     )
     with TestClient(app) as client:
         client.conn = conn
+        client.pr = pr
         yield client
     conn.close()
 
@@ -100,6 +115,59 @@ def test_dispatch_roundtrip(app_client):
         assert status == "review"
         state = app_client.conn.execute("SELECT state FROM dispatches").fetchone()[0]
         assert state == "done"
+
+
+def test_result_creates_pr_and_records_url(app_client):
+    ticket = make_ticket(app_client.conn)
+    with app_client.websocket_connect("/api/agent/channel") as ws:
+        register(ws)
+        response = app_client.post(
+            f"/internal/tickets/{ticket}/dispatch?platform=forum",
+            headers={"X-Skein-Token": TOKEN},
+        )
+        body = response.json()
+        assert body["ok"] is True
+        ws.receive_json()  # worker.create
+        ws.send_json(
+            {"t": "worker.created", "worker_id": body["worker_id"], "session_id": "sess-1"}
+        )
+        ws.receive_json()  # dispatch
+        ws.send_json(
+            {
+                "t": "result",
+                "worker_id": body["worker_id"],
+                "ticket_id": ticket,
+                "result": {
+                    "ok": True,
+                    "pushed": True,
+                    "branch": "fix/yz-sk-1",
+                    "base_commit": "abc1234",
+                    "commits": "abc1234 fix",
+                    "diffstat": "1 file changed",
+                    "remote": "git@github.com:o/r.git",
+                    "platform": "forum",
+                },
+            }
+        )
+        for _ in range(50):
+            status = app_client.conn.execute(
+                "SELECT status FROM tickets WHERE id = ?", (ticket,)
+            ).fetchone()[0]
+            if status == "review":
+                break
+            time.sleep(0.02)
+        assert status == "review"
+
+    assert len(app_client.pr.calls) == 1
+    assert app_client.pr.calls[0][0]["code"] == ticket
+    pr_url = app_client.conn.execute("SELECT pr_url FROM dispatches").fetchone()[0]
+    assert pr_url == "https://github.com/o/r/pull/1"
+    platform = app_client.conn.execute("SELECT platform FROM dispatches").fetchone()[0]
+    assert platform == "forum"
+    action = app_client.conn.execute(
+        "SELECT action FROM audit WHERE action = 'pr'"
+    ).fetchone()
+    assert action is not None
 
 
 def test_dispatch_without_node(app_client):

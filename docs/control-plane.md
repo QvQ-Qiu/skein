@@ -6,7 +6,7 @@
 
 | 模块 | 文件 | 说明 |
 | --- | --- | --- |
-| 领域库 | `skein/db.py` | SQLite WAL，schema v10；工单/线程/事件/运行/调用/Agent 消息 |
+| 领域库 | `skein/db.py` | SQLite WAL，schema v11；工单/线程/事件/运行/调用/Agent 消息 |
 | 准入 | `skein/admission.py` | 确定性 ignore/record/process；不调模型 |
 | 控制台 Agent | `skein/agent.py` | 管理员用自然语言查/操作雁阵；工具调用 + 审计 + 调用留痕 |
 | 工单/线程 | `skein/store.py` | Thread 归并、建单、去重 |
@@ -50,6 +50,11 @@ make run-control # 控制面（HTTP）
 | `SKEIN_SSO_*` | 空 | UniSSO 内接 |
 | `SKEIN_QA_CHAT_UPSTREAM` | 空 | 小秋 chat 上游 |
 | `SKEIN_ASSERTION_KEY` | 空 | chat 身份头签名，与小秋 `SKEIN_USER_SECRET` 相同 |
+| `SKEIN_GITHUB_TOKEN` | 空 | GitHub API 令牌；配置后工雁 pushed 的结果自动建 draft PR |
+| `SKEIN_GITHUB_REPOS` | 空 | platform → `owner/repo` JSON；remote 不是 GitHub 时的兜底 |
+| `SKEIN_GITHUB_BASE` | `main` | PR 的目标分支 |
+| `SKEIN_GITHUB_API` | `https://api.github.com` | GitHub API 地址 |
+| `SKEIN_GITHUB_PR_DRAFT` | `1` | 是否建 draft PR |
 
 ## 四、接口
 

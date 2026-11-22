@@ -89,12 +89,14 @@ def pick_node(
     return candidates[0]["id"]
 
 
-def open_dispatch(conn: sqlite3.Connection, ticket_id: str, node_id: str) -> str:
+def open_dispatch(
+    conn: sqlite3.Connection, ticket_id: str, node_id: str, platform: str = ""
+) -> str:
     dispatch_id = db.new_id()
     conn.execute(
-        "INSERT INTO dispatches (id, ticket_id, node_id, state, updated_at)"
-        " VALUES (?, ?, ?, 'pending', ?)",
-        (dispatch_id, ticket_id, node_id, time.time()),
+        "INSERT INTO dispatches (id, ticket_id, node_id, state, platform, updated_at)"
+        " VALUES (?, ?, ?, 'pending', ?, ?)",
+        (dispatch_id, ticket_id, node_id, platform, time.time()),
     )
     return dispatch_id
 

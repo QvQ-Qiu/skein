@@ -39,6 +39,31 @@ const mode = computed(() => {
   return "dispatch" as const;
 });
 
+interface Delivery {
+  branch?: string;
+  base_commit?: string;
+  commits?: string;
+  diffstat?: string;
+  pushed?: boolean;
+  summary?: string;
+}
+
+const delivery = computed<Delivery | null>(() => {
+  const item = props.detail?.assignments.find((row) => row.result);
+  if (!item?.result) return null;
+  try {
+    const data = JSON.parse(item.result) as Delivery;
+    return data && typeof data === "object" ? data : null;
+  } catch {
+    return null;
+  }
+});
+
+const prUrl = computed(() => {
+  const item = props.detail?.dispatches.find((row) => row.pr_url);
+  return item?.pr_url ?? "";
+});
+
 function statusText(status: string): string {
   return STATUS_LABEL[status] ?? status;
 }
@@ -151,6 +176,32 @@ function textOrEmpty(value: string | null | undefined): string {
             取消在途
           </button>
         </div>
+
+        <section v-if="delivery" class="block delivery">
+          <h3>交付</h3>
+          <dl class="kv">
+            <dt>分支</dt>
+            <dd class="mono">{{ delivery.branch || "—" }}</dd>
+            <dt>基线</dt>
+            <dd class="mono">{{ delivery.base_commit || "—" }}</dd>
+            <dt>推送</dt>
+            <dd>{{ delivery.pushed ? "已推送" : "未推送" }}</dd>
+            <dt>提交</dt>
+            <dd><pre class="diff">{{ delivery.commits || "无" }}</pre></dd>
+            <dt>变更</dt>
+            <dd><pre class="diff">{{ delivery.diffstat || "无" }}</pre></dd>
+          </dl>
+          <a v-if="prUrl" class="pr-link" :href="prUrl" target="_blank" rel="noreferrer">
+            打开 PR ↗
+          </a>
+          <p v-else class="muted pr-hint">
+            {{
+              delivery.pushed
+                ? "PR 尚未创建；控制面配置 GitHub 令牌后会自动建。"
+                : "分支未推送，无法创建 PR。"
+            }}
+          </p>
+        </section>
 
         <section class="block">
           <h3>基本信息</h3>
@@ -561,5 +612,41 @@ function textOrEmpty(value: string | null | undefined): string {
   font-family: var(--mono);
   font-size: 12px;
   line-height: 1.45;
+}
+
+.diff {
+  margin: 0;
+  padding: 6px 8px;
+  max-height: 140px;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  background: rgba(2, 4, 12, 0.55);
+  color: #a8b6e8;
+  font-family: var(--mono);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.pr-link {
+  display: inline-block;
+  margin-top: 10px;
+  padding: 5px 12px;
+  color: #041018;
+  background: var(--cyan);
+  text-decoration: none;
+  letter-spacing: 0.08em;
+  transition: background 0.18s, box-shadow 0.18s;
+}
+
+.pr-link:hover,
+.pr-link:focus-visible {
+  background: #7ae6f4;
+  box-shadow: 0 0 12px rgba(79, 216, 235, 0.45);
+}
+
+.pr-hint {
+  margin: 8px 0 0;
+  font-size: 12px;
 }
 </style>
