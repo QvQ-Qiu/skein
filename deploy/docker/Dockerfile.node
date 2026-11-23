@@ -3,7 +3,7 @@
 #
 #   docker build -f deploy/docker/Dockerfile.node -t skein-node .
 
-FROM node:22-slim
+FROM node:26-slim
 
 # Some regions reach the default Debian mirrors slowly. Pass the host name of a mirror
 # (e.g. --build-arg APT_MIRROR=mirrors.example.com) to switch; the default is unchanged.
